@@ -21,8 +21,9 @@ export function createCielClient(config: Config): CielClient {
 	const raw = createClient<paths>({
 		baseUrl: config.apiBaseUrl,
 		headers: {
+			// REST は Authorization: Bearer のみ。ciel_auth Cookie を付けると
+			// opaque トークン (ciel_at_...) が 401 になるため送らない。
 			Authorization: `Bearer ${config.accessToken}`,
-			Cookie: `ciel_auth=${config.accessToken}`,
 		},
 	});
 

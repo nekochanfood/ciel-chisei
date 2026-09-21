@@ -38,7 +38,7 @@ ciel-chisei/
 
 - REST base: `{ciel.apiBaseUrl}/api/v1` (OpenAPI `servers[0].url` is `http://localhost:6137/api/v1`).
 - Auth header: `Authorization: Bearer <access token>` (+ `ciel_auth` cookie for WS).
-- WebSocket: `{origin}/ws/events`. Ciel **rejects** handshakes without a matching `Origin` (`ciel.wsOrigin` must be in Ciel `ALLOWED_ORIGINS`). Cookie `ciel_auth` is how the backend authenticates WS (query-string tokens are not supported).
+- WebSocket: `{origin}/ws/events`. Ciel **rejects** handshakes without a matching `Origin` (`ciel.wsOrigin` must be in Ciel `ALLOWED_ORIGINS`). Authenticate with the `Authorization: Bearer` header (query-string tokens are not supported). Do **not** send the `ciel_auth` cookie: with opaque tokens (`ciel_at_...`) a present-but-invalid cookie fails closed with 401 even when Bearer is valid. Same rule applies to REST.
 - Timeline events: JSON `{ "type": "post_created", "post": { ... } }` and `{ "type": "post_deleted", "postId": "..." }`.
 - `Post.mentions[]` lists `@username` targets. `CreatePostRequest.parentId` creates a reply.
 - `GET /timeline` is public/paginated (`limit`, `cursor`). Use it for backfill and as a WS fallback.

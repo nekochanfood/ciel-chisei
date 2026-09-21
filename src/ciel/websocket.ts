@@ -26,7 +26,9 @@ export function connectRealtime(
 		socket = new WebSocket(config.wsUrl, {
 			headers: {
 				Origin: config.wsOrigin,
-				Cookie: `ciel_auth=${config.accessToken}`,
+				// opaque トークン (ciel_at_...) では ciel_auth Cookie が
+				// 401 になるため、WS も Authorization: Bearer で認証する。
+				Authorization: `Bearer ${config.accessToken}`,
 			},
 		});
 
