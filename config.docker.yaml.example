@@ -30,6 +30,10 @@ bot:
   timelineBackfillPages: 5
   # 独り言の間隔(分)。0 で無効化。
   soloPostIntervalMinutes: 120
+  # 生成のランダム性。大きいほどレアな繋がりを拾う (1.0=素直、2.0以上はカオス)。
+  temperature: 1.4
+  # 0..1。大きいほど学習文の逐語再現を崩す (文節の繋ぎ変え＋切り上げ)。
+  variety: 0.5
 
 server:
   # 8080 のままにすること (compose の ports と対応)。

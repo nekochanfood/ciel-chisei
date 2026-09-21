@@ -80,7 +80,7 @@ Do not introduce a second data store. If you change tables, keep bootstrap idemp
 - Generation: `src/bot/markov.ts`. `ingest()` is the in-memory path used by tests; `learn()` persists. `generate(seed, authorId)` boosts seed tokens (x3) and the author's own transitions (x8), starting from the author's prefixes 75% of the time.
 - Mention rules: `src/bot/text.ts` `isMentionForBot`. Default is mention-only. `bot.wakeWords` (YAML array) adds extra substrings.
 - Opt commands: `parseOptCommand` requires a mention of the bot plus exactly `学習禁止|学習拒否|オプトアウト` (opt-out) or `学習許可|学習再開|オプトイン` (opt-in). Handled in `ChiseiBot.handlePost` before learning, acknowledged with a 👍 reaction.
-- Bio: `formatBio(edgeCount)` template in `src/bot/text.ts`; `ChiseiBot.syncBio()` PATCHes only when the count changed (5-min timer + 30-s debounce after learning).
+- Bio: `formatBio(edgeCount, lastLearnedAt)` template in `src/bot/text.ts` (`覚えた言葉: N` + `(最終更新: YYYY/MM/DD HH:mm:ss JST)`); `ChiseiBot.syncBio()` reads `MAX(learned_at)` and PATCHes only when count or timestamp changed (5-min timer + 30-s debounce after learning).
 - Solo posts: `ChiseiBot.postSolo()` in `src/index.ts` on a `soloPostIntervalMinutes * 60_000` timer; `0` disables.
 - Fallback phrases when the model is empty live in `src/bot/text.ts`.
 

@@ -19,7 +19,7 @@ import { joinTokens, tokenize } from "./tokenizer.js";
 
 export class ChiseiBot {
 	private readonly inFlight = new Set<string>();
-	private lastSyncedEdgeCount = -1;
+	private lastSyncedBioKey = "";
 	private bioSyncTimer?: NodeJS.Timeout;
 
 	constructor(
@@ -33,16 +33,37 @@ export class ChiseiBot {
 	async syncBio(): Promise<void> {
 		try {
 			const count = this.markov.edgeCount;
-			if (count === this.lastSyncedEdgeCount) {
+			const lastLearnedAt = await this.lastLearnedAt();
+			// Refresh when the vocabulary OR the last-learned time changed
+			// (re-learning known trigrams bumps counts without adding edges).
+			const key = `${count}|${lastLearnedAt?.toISOString() ?? "-"}`;
+			if (key === this.lastSyncedBioKey) {
 				return;
 			}
-			const bio = formatBio(count);
+			const bio = formatBio(count, lastLearnedAt);
 			await this.client.updateBio(bio);
-			this.lastSyncedEdgeCount = count;
+			this.lastSyncedBioKey = key;
 			console.info(`[bot] synced bio with word count: ${count}`);
 		} catch (error) {
 			console.warn("[bot] failed to sync bio", error);
 		}
+	}
+
+	private async lastLearnedAt(): Promise<Date | null> {
+		const rows = await this.sql<{ last_learned_at: unknown }[]>`
+      SELECT MAX(learned_at) AS last_learned_at FROM learned_posts
+    `;
+		const raw = rows[0]?.last_learned_at;
+		if (raw instanceof Date && !Number.isNaN(+raw)) {
+			return raw;
+		}
+		if (typeof raw === "string" && raw.length > 0) {
+			const parsed = new Date(raw);
+			if (!Number.isNaN(+parsed)) {
+				return parsed;
+			}
+		}
+		return null;
 	}
 
 	requestBioSync(): void {

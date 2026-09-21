@@ -20,6 +20,8 @@ const yamlSchema = z.object({
 			pollIntervalMs: z.number().int().positive().default(15_000),
 			timelineBackfillPages: z.number().int().min(0).max(50).default(5),
 			soloPostIntervalMinutes: z.number().int().min(0).default(120),
+			temperature: z.number().positive().max(5).default(1.4),
+			variety: z.number().min(0).max(1).default(0.5),
 		})
 		.default({}),
 	server: z
@@ -43,6 +45,8 @@ export type Config = {
 	pollIntervalMs: number;
 	timelineBackfillPages: number;
 	soloPostIntervalMinutes: number;
+	temperature: number;
+	variety: number;
 	port: number;
 	logLevel: "debug" | "info" | "warn" | "error";
 };
@@ -128,6 +132,8 @@ export function loadConfig(
 		pollIntervalMs: file.bot.pollIntervalMs,
 		timelineBackfillPages: file.bot.timelineBackfillPages,
 		soloPostIntervalMinutes: file.bot.soloPostIntervalMinutes,
+		temperature: file.bot.temperature,
+		variety: file.bot.variety,
 		port: file.server.port,
 		logLevel: file.logLevel,
 	};

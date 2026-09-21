@@ -2,13 +2,43 @@ import type { Sql } from "../db.js";
 import { BOS, EOS } from "./tokenizer.js";
 
 const DEFAULT_MAX_TOKENS = 24;
+const MIN_TOKENS_BEFORE_STOP = 3;
+
+export type MarkovOptions = {
+	/** >1 flattens the distribution (more surprising picks). */
+	temperature: number;
+	/** Multiplier for tokens appearing in the conversation seed. */
+	seedBoost: number;
+	/** Additive weight per count of the author's own transitions. */
+	userBoost: number;
+	/** Probability to start generation from the author's own prefixes. */
+	userStartBias: number;
+	/** Probability to prefer seed-matching start prefixes. */
+	seededStartBias: number;
+	/** 0..1 overall novelty: drives bigram backoff + early stopping. */
+	variety: number;
+};
+
+const DEFAULT_OPTIONS: MarkovOptions = {
+	temperature: 1.4,
+	seedBoost: 2,
+	userBoost: 6,
+	userStartBias: 0.6,
+	seededStartBias: 0.7,
+	variety: 0.5,
+};
 
 export class MarkovModel {
+	private readonly options: MarkovOptions;
 	private readonly globalEdges = new Map<string, Map<string, number>>();
 	private readonly userEdges = new Map<
 		string,
 		Map<string, Map<string, number>>
 	>();
+
+	constructor(options: Partial<MarkovOptions> = {}) {
+		this.options = { ...DEFAULT_OPTIONS, ...options };
+	}
 
 	async load(sql: Sql): Promise<void> {
 		this.globalEdges.clear();
@@ -80,6 +110,7 @@ export class MarkovModel {
 			if (!prefix) {
 				prefix = `${BOS}\t${BOS}`;
 			}
+			const stopProbability = 0.3 * this.options.variety;
 			const output: string[] = [];
 			for (let i = 0; i < maxTokens; i += 1) {
 				const next = this.pickNext(prefix, seedTokens, authorId);
@@ -87,6 +118,14 @@ export class MarkovModel {
 					break;
 				}
 				output.push(next);
+				// Random early stop breaks verbatim reproduction of long
+				// memorized passages while keeping short replies intact.
+				if (
+					output.length >= MIN_TOKENS_BEFORE_STOP &&
+					Math.random() < stopProbability
+				) {
+					break;
+				}
 				const parts: string[] = prefix.split("\t");
 				prefix = `${parts[1] ?? BOS}\t${next}`;
 			}
@@ -135,7 +174,7 @@ export class MarkovModel {
 				: [];
 
 		const candidatePrefixes =
-			userPrefixes.length > 0 && Math.random() < 0.75
+			userPrefixes.length > 0 && Math.random() < this.options.userStartBias
 				? userPrefixes
 				: [...this.globalEdges.keys()];
 
@@ -155,7 +194,7 @@ export class MarkovModel {
 			);
 		});
 
-		if (seeded.length > 0 && Math.random() < 0.8) {
+		if (seeded.length > 0 && Math.random() < this.options.seededStartBias) {
 			return seeded[Math.floor(Math.random() * seeded.length)];
 		}
 		if (this.globalEdges.has(`${BOS}\t${BOS}`) && Math.random() < 0.4) {
@@ -171,14 +210,30 @@ export class MarkovModel {
 		seedTokens: string[],
 		authorId?: string,
 	): string | undefined {
-		const globalNexts = this.globalEdges.get(prefix);
+		const backoffRate = 0.7 * this.options.variety;
+		let globalNexts = this.globalEdges.get(prefix);
+		let userNexts = authorId
+			? this.userEdges.get(authorId)?.get(prefix)
+			: undefined;
+
+		// Bigram backoff: when the trigram prefix has at most one
+		// continuation (the common case in a small corpus), sometimes
+		// recombine via all transitions sharing the last token instead of
+		// walking the single memorized path.
+		if (
+			(!globalNexts || globalNexts.size <= 1) &&
+			Math.random() < backoffRate
+		) {
+			const fallback = this.bigramFallback(prefix, authorId);
+			if (fallback.global.size > 0) {
+				globalNexts = fallback.global;
+				userNexts = fallback.user;
+			}
+		}
 		if (!globalNexts || globalNexts.size === 0) {
 			return undefined;
 		}
 
-		const userNexts = authorId
-			? this.userEdges.get(authorId)?.get(prefix)
-			: undefined;
 		const seedSet = new Set(seedTokens);
 		const weighted: Array<{ token: string; weight: number }> = [];
 
@@ -186,13 +241,18 @@ export class MarkovModel {
 			let weight = count;
 			// Boost tokens if in conversation seed
 			if (seedSet.has(token)) {
-				weight *= 3;
+				weight *= this.options.seedBoost;
 			}
-			// Significant boost if this specific user used this transition
+			// Boost if this specific user used this transition
 			if (userNexts?.has(token)) {
-				weight += (userNexts.get(token) ?? 0) * 8;
+				weight += (userNexts.get(token) ?? 0) * this.options.userBoost;
 			}
-			weighted.push({ token, weight });
+			// Temperature flattens the distribution so rare alternatives
+			// surface instead of always taking the memorized winner.
+			weighted.push({
+				token,
+				weight: weight ** (1 / this.options.temperature),
+			});
 		}
 
 		const total = weighted.reduce((sum, item) => sum + item.weight, 0);
@@ -204,5 +264,45 @@ export class MarkovModel {
 			}
 		}
 		return weighted.at(-1)?.token;
+	}
+
+	/**
+	 * Aggregate every known transition whose prefix ends with the same
+	 * token, i.e. order-1 view derived from the trigram table.
+	 * Needs no schema change: it is computed from loaded edges.
+	 */
+	private bigramFallback(
+		prefix: string,
+		authorId?: string,
+	): { global: Map<string, number>; user?: Map<string, number> } {
+		const last = prefix.split("\t")[1] ?? BOS;
+		const global = new Map<string, number>();
+		for (const [key, nexts] of this.globalEdges) {
+			if (key.split("\t")[1] !== last) {
+				continue;
+			}
+			for (const [token, count] of nexts) {
+				global.set(token, (global.get(token) ?? 0) + count);
+			}
+		}
+		let user: Map<string, number> | undefined;
+		if (authorId) {
+			const userMap = this.userEdges.get(authorId);
+			if (userMap) {
+				user = new Map<string, number>();
+				for (const [key, nexts] of userMap) {
+					if (key.split("\t")[1] !== last) {
+						continue;
+					}
+					for (const [token, count] of nexts) {
+						user.set(token, (user.get(token) ?? 0) + count);
+					}
+				}
+				if (user.size === 0) {
+					user = undefined;
+				}
+			}
+		}
+		return { global, user };
 	}
 }

@@ -17,7 +17,10 @@ async function main(): Promise<void> {
 	await migrate(sql);
 	await loadTokenizer();
 
-	const markov = new MarkovModel();
+	const markov = new MarkovModel({
+		temperature: config.temperature,
+		variety: config.variety,
+	});
 	await markov.load(sql);
 
 	const client = createCielClient(config);

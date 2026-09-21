@@ -45,6 +45,9 @@ describe("ChiseiBot", () => {
 			if (query.includes("SELECT post_id FROM replied_posts")) {
 				return [];
 			}
+			if (q.includes("select max(learned_at)")) {
+				return [{ last_learned_at: new Date("2026-09-21T09:00:00.000Z") }];
+			}
 			return [];
 		}) as unknown as Sql;
 
@@ -130,5 +133,18 @@ describe("ChiseiBot", () => {
 		expect(client.updateBio).toHaveBeenCalledTimes(1);
 		const updatedBio = vi.mocked(client.updateBio).mock.calls[0][0];
 		expect(updatedBio).toContain(`覚えた言葉: ${markov.edgeCount}`);
+		// 2026-09-21T09:00:00Z == 18:00 JST
+		expect(updatedBio).toContain("(最終更新: 2026/09/21 18:00:00)");
+	});
+
+	it("skips bio sync when nothing changed", async () => {
+		const { sql, client, markov } = createMockSetup();
+		markov.ingest(["今日", "は", "晴れ"]);
+		const bot = new ChiseiBot(sql, client, me, markov, []);
+
+		await bot.syncBio();
+		await bot.syncBio();
+
+		expect(client.updateBio).toHaveBeenCalledTimes(1);
 	});
 });

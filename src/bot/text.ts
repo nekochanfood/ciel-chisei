@@ -116,12 +116,30 @@ export function pickFallback(): string {
 	return FALLBACKS[Math.floor(Math.random() * FALLBACKS.length)] ?? "……";
 }
 
-export function formatBio(wordCount: number): string {
-	return `タイムラインに流れたテキストを学習して言葉を覚えます。
+export function formatBio(wordCount: number, updatedAt?: Date | null): string {
+	const base = `タイムラインに流れたテキストを学習して言葉を覚えます。
 
-覚えた言葉: ${wordCount}
+覚えた言葉: ${wordCount}`;
+	const stamp = updatedAt ? `\n(最終更新: ${formatTimestamp(updatedAt)})` : "";
+	return `${base}${stamp}
 
 学習されるかどうかはオプトアウト式になっており、"(メンション) 学習禁止"でブラックリスト登録、"(メンション) 学習許可"でブラックリストから除外されます。`;
+}
+
+/** Format as `YYYY/MM/DD HH:mm:ss` in Asia/Tokyo. */
+export function formatTimestamp(date: Date): string {
+	return new Intl.DateTimeFormat("sv-SE", {
+		timeZone: "Asia/Tokyo",
+		year: "numeric",
+		month: "2-digit",
+		day: "2-digit",
+		hour: "2-digit",
+		minute: "2-digit",
+		second: "2-digit",
+		hourCycle: "h23",
+	})
+		.format(date)
+		.replaceAll("-", "/");
 }
 
 function escapeRegExp(value: string): string {

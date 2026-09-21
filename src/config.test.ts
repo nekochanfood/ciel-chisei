@@ -59,6 +59,8 @@ database:
 		expect(config.pollIntervalMs).toBe(15_000);
 		expect(config.timelineBackfillPages).toBe(5);
 		expect(config.soloPostIntervalMinutes).toBe(120);
+		expect(config.temperature).toBe(1.4);
+		expect(config.variety).toBe(0.5);
 		expect(config.wsOrigin).toBe("http://localhost:3000");
 		expect(config.port).toBe(8080);
 		expect(config.logLevel).toBe("info");

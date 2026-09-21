@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MarkovModel } from "./bot/markov.js";
 import {
 	buildReply,
 	formatBio,
+	formatTimestamp,
 	isMentionForBot,
 	parseOptCommand,
 } from "./bot/text.js";
@@ -173,6 +174,23 @@ describe("formatBio", () => {
 		expect(bio).toContain('"(メンション) 学習禁止"でブラックリスト登録');
 		expect(bio).toContain('"(メンション) 学習許可"でブラックリストから除外');
 	});
+
+	it("appends the last-updated timestamp in JST slash format", () => {
+		const bio = formatBio(284, new Date("2012-04-04T03:34:56.000Z"));
+		expect(bio).toContain("覚えた言葉: 284");
+		expect(bio).toContain("(最終更新: 2012/04/04 12:34:56)");
+	});
+
+	it("omits the timestamp line when never learned", () => {
+		expect(formatBio(0, null)).not.toContain("最終更新");
+		expect(formatBio(0)).not.toContain("最終更新");
+	});
+
+	it("formats timestamps as JST slash dates", () => {
+		expect(formatTimestamp(new Date("2012-04-04T03:34:56.000Z"))).toBe(
+			"2012/04/04 12:34:56",
+		);
+	});
 });
 
 describe("MFM parsing and tokenization", () => {
@@ -210,5 +228,31 @@ describe("MarkovModel", () => {
 		const out = model.generate(["今日"]);
 		expect(out.length).toBeGreaterThan(0);
 		expect(out.includes(BOS)).toBe(false);
+	});
+
+	it("recombines fragments instead of always reproducing training data", () => {
+		const model = new MarkovModel();
+		model.ingest(["a", "b", "c", "d"]);
+		model.ingest(["x", "b", "z"]);
+		const distinct = new Set<string>();
+		for (let i = 0; i < 100; i += 1) {
+			const out = model.generate([]);
+			if (out.length > 0) {
+				distinct.add(out.join(" "));
+			}
+		}
+		// Backoff should sometimes join "a b" with "z" (never learned verbatim)
+		expect(distinct.size).toBeGreaterThanOrEqual(2);
+	});
+
+	it("variety 0 reproduces the single memorized path deterministically", () => {
+		const random = vi.spyOn(Math, "random").mockReturnValue(0);
+		try {
+			const model = new MarkovModel({ variety: 0, temperature: 1 });
+			model.ingest(["a", "b", "c"]);
+			expect(model.generate([])).toEqual(["a", "b", "c"]);
+		} finally {
+			random.mockRestore();
+		}
 	});
 });
