@@ -14,9 +14,10 @@ Ciel（[bettaworx/ciel](https://github.com/bettaworx/ciel)）向けの、知性b
 - タイムラインの投稿本文に加え、自分の過去・手動・自動投稿も学習
 - `@ボット名 学習禁止` / `@ボット名 学習許可` でオプトアウト管理。処理後に👍リアクション
 - mfm-js で MFM をパースしてから学習（装飾・メンション・URL・コードを除外、絵文字/カスタム絵文字 `:name:` は保持）
-- BudouX で日本語を文節寄りに分割
+- kuromoji で日本語を形態素＋品詞に分割し、文単位で学習（句読点は学習せず発話時に全角装飾として付与）
+- 学習文の丸暗記を拒否し、形態素の繋ぎ変えでランダマイズして発話
 - 自分が実際に使った言い回しを優先し、Bot 固有の話し方へ自己パーソナライズ
-- 30% は学習語を `!` / `...` / `?` / `。` / `、` で読み替え、70% は再結合した文章として言葉遊びをする
+- 30% は学習語を `！` / `…` / `？` / `。` / `、` で読み替え、70% は再結合した文章として言葉遊びをする
 - プロフィールの自己紹介に `覚えた言葉: N` を自動反映
 - 定期的な独り言（分単位で調整可、`0` で無効化）
 - 学習語彙・文頭/文末ラベル・返信履歴を PostgreSQL に保存し、Prisma で管理
@@ -59,6 +60,13 @@ npm run dev
 | `bot.pollIntervalMs` | no | `15000` | WS 切断時の `/timeline` ポーリング間隔 |
 | `bot.timelineBackfillPages` | no | `5` | 起動時に遡って学習するページ数（1ページ=30件） |
 | `bot.soloPostIntervalMinutes` | no | `120` | 独り言の間隔（分）。`0` で無効化 |
+| `bot.replyRate` | no | `1` | メンション・合言葉への返信確率（0..1）。学習は確率に関わらず行う |
+| `bot.soloPostRate` | no | `1` | 独り言タイマー tick ごとの投稿確率（0..1） |
+| `bot.replyLengthFactor` | no | `1` | 返信の長さ＝相手の文のトークン数×係数。min/max で丸める |
+| `bot.replyMinTokens` | no | `2` | 返信の最小トークン数 |
+| `bot.replyMaxTokens` | no | `24` | 返信の最大トークン数 |
+| `bot.temperature` | no | `1.8` | 生成のランダム性。大きいほどレアな繋がりを拾う |
+| `bot.variety` | no | `0.8` | 学習文の逐語再現を崩す強さ。`0` で決定論的再現 |
 | `server.port` | no | `8080` | ヘルスチェック HTTP ポート。Docker では `8080` のままにすること |
 | `logLevel` | no | `info` | `debug` / `info` / `warn` / `error` |
 
@@ -91,6 +99,12 @@ docker compose up --build
 - ホストの `./config.yaml` をコンテナの `/app/config.yaml` に read-only マウントして読みます。
 - イメージに `config.yaml` は含めません（`.dockerignore` で除外、`Dockerfile` で `COPY` しない）。
 - ボットは `:8080/healthz` で生存確認できます。Compose 内の PostgreSQL に語彙を保存します。Ciel 本体はこのリポジトリには含まれません。
+- 起動時は必ず `migrate deploy` が走るため、ローカル・Docker どちらのデプロイでも未適用 migration（kuromoji 移行時の学習データ全消去を含む）が自動適用されます。`--build` 付きで起動すること。
+- 消去が取り残された場合は手動で消去できます（再起動後に学び直します）:
+  ```bash
+  npm run db:reset-markov -- --config ./config.yaml
+  docker compose exec bot npm run db:reset-markov -- --config /app/config.yaml
+  ```
 
 ## OpenAPI 型生成
 

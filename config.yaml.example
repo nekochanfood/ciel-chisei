@@ -28,10 +28,18 @@ bot:
   timelineBackfillPages: 5
   # 独り言の間隔(分)。0 で無効化。
   soloPostIntervalMinutes: 120
+  # 0..1。メンション・合言葉への返信確率。1で必ず返信、0で返信しない(学習はする)。
+  replyRate: 1
+  # 0..1。独り言タイマー tick ごとの投稿確率。1で毎回投稿。
+  soloPostRate: 1
+  # 返信の長さ = 相手の文のトークン数 × この係数。min/max で丸める。
+  replyLengthFactor: 1
+  replyMinTokens: 2
+  replyMaxTokens: 24
   # 生成のランダム性。大きいほどレアな繋がりを拾う (1.0=素直、2.0以上はカオス)。
-  temperature: 1.4
-  # 0..1。大きいほど学習文の逐語再現を崩す (文節の繋ぎ変え＋切り上げ)。
-  variety: 0.5
+  temperature: 1.8
+  # 0..1。大きいほど学習文の逐語再現を崩す (繋ぎ変え＋切り上げ＋verbatim拒否)。0=決定論的再現。
+  variety: 0.8
 
 server:
   # Docker では 8080 のままにすること (compose の ports と対応)。

@@ -44,6 +44,25 @@ model MarkovTokenLabel {
   @@map("markov_token_labels")
 }
 
+model MarkovSequence {
+  hash      String   @id
+  text      String
+  count     Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("markov_sequences")
+}
+
+model MarkovTokenPos {
+  token  String
+  pos    String
+  detail String @default("")
+  count  Int    @default(1)
+
+  @@id([token, pos, detail])
+  @@map("markov_token_pos")
+}
+
 model LearningBlacklist {
   userId    String   @id @map("user_id")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz

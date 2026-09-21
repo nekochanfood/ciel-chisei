@@ -29,7 +29,7 @@ ciel-chisei/
 │   └── bot/
 │       ├── chisei.ts        # learn + opt-out/in + mention reply + solo post + bio sync
 │       ├── markov.ts        # order-2 Markov model (global + per-author edges)
-│       ├── tokenizer.ts     # mfm-js parsing + BudouX segmentation
+  │       ├── tokenizer.ts     # mfm-js parsing + kuromoji morphemes w/ POS (Intl.Segmenter fallback)
 │       └── text.ts          # mention detection, opt commands, reply formatting, formatBio
 ├── Dockerfile               # never COPY config.yaml; runtime reads the mounted file
 └── docker-compose.yml.example # copy to docker-compose.yml (gitignored); bot + PostgreSQL
@@ -75,25 +75,27 @@ PostgreSQL, managed by the committed Prisma migrations and applied before boot:
 - `replied_posts(post_id, reply_id, replied_at)` — skip duplicate replies
 - `markov_edges(author_id, prefix, next, count)` — trigram transitions (`w1\tw2` → next token), global (`author_id=''`) plus per-author rows for personalization
 - `markov_token_labels(token, can_start, can_end)` — observed sentence-position labels
+- `markov_sequences(hash, text, count)` — learned-sentence hashes for verbatim rejection
+- `markov_token_pos(token, pos, detail, count)` — POS categories per token for start/end filtering
 - `learning_blacklist(user_id, created_at)` — opt-out list (`学習禁止` / `学習許可`)
 
 Do not introduce a second data store. Change tables through `prisma/schema.prisma` and a committed Prisma migration.
 
 ## Changing speech behavior
 
-- Tokenization: `src/bot/tokenizer.ts` (mfm-js strips mentions/URLs/code/decorators, keeps unicode + `:custom_emoji:`; BudouX segments the rest). `loadTokenizer()` is a no-op kept for the boot sequence.
-- Generation: `src/bot/markov.ts`. `ingest()` updates memory and `persist()` writes inside the learning transaction. Replies and solo posts call `generate(seed, me.id)`, so the bot's own transitions form its persona while seed tokens supply the topic. Thirty percent use the five punctuation styles; generation only starts/ends on observed position labels.
+- Tokenization: `src/bot/tokenizer.ts` (mfm-js strips mentions/URLs/code/decorators; unicode emoji + `:custom_emoji:` are decoration and dropped before learning; kuromoji segments the rest into morphemes with POS tags, `Intl.Segmenter` fallback; punctuation is stripped at learn time and re-added as full-width decorations at speech time). `loadTokenizer()` loads the kuromoji dictionary at boot. Sanitization in `cleanPlainText`: markdown links keep text only; emails, `https?://` URLs, bare domains, IPv4/`localhost:port`, mentions, and emoji are dropped before learning.
+- Generation: `src/bot/markov.ts`. `ingest()` updates memory and `persist()` writes inside the learning transaction (edges + labels + learned-sentence hashes in `markov_sequences` + POS categories in `markov_token_pos`). Replies and solo posts call `generate(seed, me.id)`, so the bot's own transitions form its persona while seed tokens supply the topic. Thirty percent use the five full-width punctuation styles; generation only starts/ends on observed position labels refined by POS categories, and verbatim reproductions of learned sentences are rejected (unless `variety: 0`). Single-token outputs must be standalone-capable (`isStandaloneOk`: no bare auxiliaries/particles like 「ております」); every utterance must contain at least one content word (`CONTENT_POS`: 自立語), enforced in `ChiseiBot.isPostable`.
 - Mention rules: `src/bot/text.ts` `isMentionForBot`. Default is mention-only. `bot.wakeWords` (YAML array) adds extra substrings.
 - Opt commands: `parseOptCommand` requires a mention of the bot plus exactly `学習禁止|学習拒否|オプトアウト` (opt-out) or `学習許可|学習再開|オプトイン` (opt-in). Handled in `ChiseiBot.handlePost` before learning, acknowledged with a 👍 reaction.
 - Bio: `formatBio(edgeCount, lastLearnedAt)` template in `src/bot/text.ts` (`覚えた言葉: N` + `(最終更新: YYYY/MM/DD HH:mm:ss JST)`); `ChiseiBot.syncBio()` reads `MAX(learned_at)` and PATCHes only when count or timestamp changed (5-min timer + 30-s debounce after learning).
-- Solo posts: `ChiseiBot.postSolo()` in `src/index.ts` on a `soloPostIntervalMinutes * 60_000` timer; `0` disables.
-- Fallback phrases when the model is empty live in `src/bot/text.ts`.
+- Solo posts: `ChiseiBot.postSolo()` in `src/index.ts` on a `soloPostIntervalMinutes * 60_000` timer; `0` disables. Talk volume: `bot.replyRate` gates mention replies, `bot.soloPostRate` gates solo ticks (both 0..1, default 1; learning still happens on skips). Reply length adapts: `generate(seed, me.id, targetTokens)` with `target = clamp(round(seedTokens * replyLengthFactor), replyMinTokens, replyMaxTokens)`, retrying at full length when the targeted generation comes back empty (avoids fallback phrases on short mentions).
+- Fallback phrases when the model is empty live in `src/bot/text.ts`. `tryGenerate` collects up to 3 candidates per length round and posts the best `scoreCandidate` (content words + seed overlap + closeness to target length). Fallback posts are recorded in `learned_posts` but never ingested as edges, so fallback boilerplate never pollutes the vocabulary (not even via later timeline encounters).
 
 When you change mention/Markov/reply formatting, update `src/text.test.ts` / `src/bot.test.ts`. When you change config keys, update `src/config.test.ts`, `config.yaml.example`, and the README reference table.
 
 ## Docker / GitHub deploy notes
 
-- Compose `bot` runs `npm start -- --config /app/config.yaml`, applies Prisma migrations, and mounts `./config.docker.yaml:/app/config.yaml:ro`. The image never bundles any config (`.dockerignore` + no `COPY` in `Dockerfile`).
+- Compose `bot` runs `npm start -- --config /app/config.yaml`, applies Prisma migrations, and mounts `./config.docker.yaml:/app/config.yaml:ro`. The image never bundles any config (`.dockerignore` + no `COPY` in `Dockerfile`). Every boot runs `migrate deploy` via `scripts/start.mjs`, so the markov wipe migration also applies on Docker deploys (always `up --build`). Leftovers can be wiped manually with `npm run db:reset-markov` (local) or `docker compose exec bot npm run db:reset-markov -- --config /app/config.yaml`.
 - Local dev uses `config.yaml` (`localhost` URLs). Docker uses `config.docker.yaml`: Ciel at `host.docker.internal:6137`, DB at `postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei`. Never use `localhost` inside the container (it points at the container itself).
 - Keep `server.port` at `8080` under Docker (matches `ports: "8080:8080"`).
 - Image build runs `npm run gen:openapi` if the network can reach GitHub; otherwise committed `src/generated/api.d.ts` is used. After a Ciel API change, regenerate and commit the types.
@@ -103,7 +105,9 @@ When you change mention/Markov/reply formatting, update `src/text.test.ts` / `sr
 
 1. Ciel OpenAPI changed → `npm run gen:openapi`, fix `src/ciel/client.ts` compile errors, commit `src/generated/api.d.ts`.
 2. Bot loops or echoes itself → inspect the persisted `me.id` transitions and generation variety; own posts are deliberately learned once through `learned_posts`.
+3. P2021 table does not exist at boot → migrations never applied: check `migrate status`, redeploy (`up --build`), and make sure the compose `command` still goes through `npm start`. `assertSchemaReady()` in `src/db.ts` reports the missing tables explicitly.
+4. P3005 (database is not empty) on `migrate deploy` → pre-Prisma tables exist: baseline with `migrate resolve --applied "20260921120000_adopt_existing_schema"` (one-off `compose run --rm bot ...`), then redeploy. Never `down -v` (loses `replied_posts`/`learning_blacklist`). The markov_sequences migration is baseline-safe: it backfills missing tables/columns and guards its DELETEs.
 3. WS never connects → check Ciel `ALLOWED_ORIGINS` vs `ciel.wsOrigin`; polling should still learn/reply.
 4. Token rejected → user must paste a fresh **access** JWT into `ciel.accessToken` in `config.yaml`. Refresh-cookie flow is not implemented.
 5. `Config file not found` at boot → copy `config.yaml.example` to the resolved path (`--config`, `CONFIG_PATH`, or `./config.yaml`).
-6. Solo posts too chatty/quiet → adjust `bot.soloPostIntervalMinutes` (`0` disables).
+6. Solo posts too chatty/quiet → adjust `bot.soloPostIntervalMinutes` (`0` disables) and `bot.soloPostRate`. Mention replies too chatty → lower `bot.replyRate`. Reply length off → tune `bot.replyLengthFactor` / `bot.replyMinTokens` / `bot.replyMaxTokens`.

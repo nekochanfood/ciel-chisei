@@ -20,8 +20,13 @@ const yamlSchema = z.object({
 			pollIntervalMs: z.number().int().positive().default(15_000),
 			timelineBackfillPages: z.number().int().min(0).max(50).default(5),
 			soloPostIntervalMinutes: z.number().int().min(0).default(120),
-			temperature: z.number().positive().max(5).default(1.4),
-			variety: z.number().min(0).max(1).default(0.5),
+			replyRate: z.number().min(0).max(1).default(1),
+			soloPostRate: z.number().min(0).max(1).default(1),
+			replyLengthFactor: z.number().positive().max(5).default(1),
+			replyMinTokens: z.number().int().min(1).default(2),
+			replyMaxTokens: z.number().int().min(1).max(100).default(24),
+			temperature: z.number().positive().max(5).default(1.8),
+			variety: z.number().min(0).max(1).default(0.8),
 		})
 		.default({}),
 	server: z
@@ -45,6 +50,11 @@ export type Config = {
 	pollIntervalMs: number;
 	timelineBackfillPages: number;
 	soloPostIntervalMinutes: number;
+	replyRate: number;
+	soloPostRate: number;
+	replyLengthFactor: number;
+	replyMinTokens: number;
+	replyMaxTokens: number;
 	temperature: number;
 	variety: number;
 	port: number;
@@ -132,6 +142,11 @@ export function loadConfig(
 		pollIntervalMs: file.bot.pollIntervalMs,
 		timelineBackfillPages: file.bot.timelineBackfillPages,
 		soloPostIntervalMinutes: file.bot.soloPostIntervalMinutes,
+		replyRate: file.bot.replyRate,
+		soloPostRate: file.bot.soloPostRate,
+		replyLengthFactor: file.bot.replyLengthFactor,
+		replyMinTokens: file.bot.replyMinTokens,
+		replyMaxTokens: file.bot.replyMaxTokens,
 		temperature: file.bot.temperature,
 		variety: file.bot.variety,
 		port: file.server.port,

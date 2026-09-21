@@ -23,6 +23,11 @@ bot:
   pollIntervalMs: 1234
   timelineBackfillPages: 2
   soloPostIntervalMinutes: 37
+  replyRate: 0.5
+  soloPostRate: 0.25
+  replyLengthFactor: 1.5
+  replyMinTokens: 3
+  replyMaxTokens: 20
 server:
   port: 8099
 logLevel: debug
@@ -42,6 +47,11 @@ describe("loadConfig (YAML only)", () => {
 		expect(config.pollIntervalMs).toBe(1234);
 		expect(config.timelineBackfillPages).toBe(2);
 		expect(config.soloPostIntervalMinutes).toBe(37);
+		expect(config.replyRate).toBe(0.5);
+		expect(config.soloPostRate).toBe(0.25);
+		expect(config.replyLengthFactor).toBe(1.5);
+		expect(config.replyMinTokens).toBe(3);
+		expect(config.replyMaxTokens).toBe(20);
 		expect(config.port).toBe(8099);
 		expect(config.logLevel).toBe("debug");
 	});
@@ -59,8 +69,13 @@ database:
 		expect(config.pollIntervalMs).toBe(15_000);
 		expect(config.timelineBackfillPages).toBe(5);
 		expect(config.soloPostIntervalMinutes).toBe(120);
-		expect(config.temperature).toBe(1.4);
-		expect(config.variety).toBe(0.5);
+		expect(config.replyRate).toBe(1);
+		expect(config.soloPostRate).toBe(1);
+		expect(config.replyLengthFactor).toBe(1);
+		expect(config.replyMinTokens).toBe(2);
+		expect(config.replyMaxTokens).toBe(24);
+		expect(config.temperature).toBe(1.8);
+		expect(config.variety).toBe(0.8);
 		expect(config.wsOrigin).toBe("http://localhost:3000");
 		expect(config.port).toBe(8080);
 		expect(config.logLevel).toBe("info");

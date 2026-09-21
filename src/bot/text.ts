@@ -10,7 +10,7 @@ export type PostLike = {
 	deletedAt?: string | null;
 };
 
-const FALLBACKS = [
+export const FALLBACKS = [
 	"……",
 	"なにそれ",
 	"もぐもぐ",

@@ -14,6 +14,8 @@ COPY prisma ./prisma
 COPY prisma.config.ts ./
 COPY tsconfig.json vitest.config.ts ./
 COPY src ./src
+# migration.test.ts がデプロイ経路を検証するために参照する (テスト専用、runtime には含めない)
+COPY Dockerfile docker-compose.yml.example ./
 
 RUN npm ci
 # Refresh types from Ciel OpenAPI when the network is available.

@@ -22,13 +22,14 @@
 		"db:migrate": "node scripts/prisma.mjs migrate dev",
 		"db:deploy": "node scripts/prisma.mjs migrate deploy",
 		"db:studio": "node scripts/prisma.mjs studio",
+		"db:reset-markov": "node scripts/reset-markov.mjs",
 		"db:validate": "prisma validate"
 	},
 	"dependencies": {
 		"@prisma/adapter-pg": "^7.9.1",
 		"@prisma/client": "^7.9.1",
-		"budoux": "^0.9.2",
 		"js-yaml": "^5.4.2",
+		"kuromoji": "^0.1.2",
 		"mfm-js": "^0.26.0",
 		"openapi-fetch": "^0.13.4",
 		"pg": "^8.23.0",

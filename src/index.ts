@@ -1,10 +1,10 @@
 import { ChiseiBot } from "./bot/chisei.js";
 import { MarkovModel } from "./bot/markov.js";
-import { loadTokenizer } from "./bot/tokenizer.js";
+import { getTokenizerKind, loadTokenizer } from "./bot/tokenizer.js";
 import { createCielClient } from "./ciel/client.js";
 import { connectRealtime } from "./ciel/websocket.js";
 import { loadConfig } from "./config.js";
-import { createDb, waitForDatabase } from "./db.js";
+import { assertSchemaReady, createDb, waitForDatabase } from "./db.js";
 import { startHealthServer } from "./health.js";
 
 async function main(): Promise<void> {
@@ -14,7 +14,9 @@ async function main(): Promise<void> {
 	const health = startHealthServer(config.port, () => ready);
 
 	await waitForDatabase(db);
+	await assertSchemaReady(db);
 	await loadTokenizer();
+	console.info(`[tokenizer] kind=${getTokenizerKind()}`);
 
 	const markov = new MarkovModel({
 		temperature: config.temperature,
@@ -28,7 +30,16 @@ async function main(): Promise<void> {
 		`[bot] logged in as @${me.username} (${me.id}), markov edges=${markov.edgeCount}`,
 	);
 
-	const bot = new ChiseiBot(db, client, me, markov, config.wakeWords);
+	const bot = new ChiseiBot(db, client, me, markov, config.wakeWords, {
+		replyRate: config.replyRate,
+		soloPostRate: config.soloPostRate,
+		replyLengthFactor: config.replyLengthFactor,
+		replyMinTokens: config.replyMinTokens,
+		replyMaxTokens: config.replyMaxTokens,
+	});
+	console.info(
+		`[bot] talk volume: replyRate=${config.replyRate} soloPostRate=${config.soloPostRate} replyLength=${config.replyMinTokens}..${config.replyMaxTokens} (x${config.replyLengthFactor})`,
+	);
 
 	const seen = new Set<string>();
 	const handle = async (
