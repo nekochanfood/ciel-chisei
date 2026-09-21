@@ -42,6 +42,7 @@ ciel-chisei/
 - Timeline events: JSON `{ "type": "post_created", "post": { ... } }` and `{ "type": "post_deleted", "postId": "..." }`.
 - `Post.mentions[]` lists `@username` targets. `CreatePostRequest.parentId` creates a reply.
 - `GET /timeline` is public/paginated (`limit`, `cursor`). Use it for backfill and as a WS fallback.
+- `GET /users/{username}/posts` is paginated and backfills the bot's own speech history at startup.
 - Reactions: `POST /posts/{postId}/reactions` with `{ "emoji": "👍" }`; `409` means already reacted (treated as success).
 - Bio: `PATCH /me/profile` with `{ "bio": "..." }`.
 
@@ -77,7 +78,7 @@ Do not introduce a second data store. If you change tables, keep bootstrap idemp
 ## Changing speech behavior
 
 - Tokenization: `src/bot/tokenizer.ts` (mfm-js strips mentions/URLs/code/decorators, keeps unicode + `:custom_emoji:`; BudouX segments the rest). `loadTokenizer()` is a no-op kept for the boot sequence.
-- Generation: `src/bot/markov.ts`. `ingest()` is the in-memory path used by tests; `learn()` persists. `generate(seed, authorId)` boosts seed tokens (x3) and the author's own transitions (x8), starting from the author's prefixes 75% of the time.
+- Generation: `src/bot/markov.ts`. `ingest()` is the in-memory path used by tests; `learn()` persists. Replies and solo posts call `generate(seed, me.id)`, so the bot's own transitions form its persona while seed tokens only supply the topic. Thirty percent of utterances stop at one BudouX token; the rest use normal generation.
 - Mention rules: `src/bot/text.ts` `isMentionForBot`. Default is mention-only. `bot.wakeWords` (YAML array) adds extra substrings.
 - Opt commands: `parseOptCommand` requires a mention of the bot plus exactly `学習禁止|学習拒否|オプトアウト` (opt-out) or `学習許可|学習再開|オプトイン` (opt-in). Handled in `ChiseiBot.handlePost` before learning, acknowledged with a 👍 reaction.
 - Bio: `formatBio(edgeCount, lastLearnedAt)` template in `src/bot/text.ts` (`覚えた言葉: N` + `(最終更新: YYYY/MM/DD HH:mm:ss JST)`); `ChiseiBot.syncBio()` reads `MAX(learned_at)` and PATCHes only when count or timestamp changed (5-min timer + 30-s debounce after learning).
@@ -97,7 +98,7 @@ When you change mention/Markov/reply formatting, update `src/text.test.ts` / `sr
 ## Typical follow-up tasks
 
 1. Ciel OpenAPI changed → `npm run gen:openapi`, fix `src/ciel/client.ts` compile errors, commit `src/generated/api.d.ts`.
-2. Bot loops or echoes itself → confirm `isOwnPost` and that learning skips `me.id`.
+2. Bot loops or echoes itself → inspect the persisted `me.id` transitions and generation variety; own posts are deliberately learned once through `learned_posts`.
 3. WS never connects → check Ciel `ALLOWED_ORIGINS` vs `ciel.wsOrigin`; polling should still learn/reply.
 4. Token rejected → user must paste a fresh **access** JWT into `ciel.accessToken` in `config.yaml`. Refresh-cookie flow is not implemented.
 5. `Config file not found` at boot → copy `config.yaml.example` to the resolved path (`--config`, `CONFIG_PATH`, or `./config.yaml`).

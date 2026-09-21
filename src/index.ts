@@ -45,6 +45,7 @@ async function main(): Promise<void> {
 		await bot.handlePost(post);
 	};
 
+	await bot.learnOwnHistory();
 	await backfill(client, bot, config.timelineBackfillPages);
 	await bot.syncBio();
 

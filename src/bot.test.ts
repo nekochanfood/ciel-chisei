@@ -15,6 +15,7 @@ describe("ChiseiBot", () => {
 	function createMockSetup() {
 		const executedSql: string[] = [];
 		const blacklist = new Set<string>();
+		const learnedPosts = new Set<string>();
 
 		// Mock sql tagged template
 		const sql = (async (
@@ -40,7 +41,12 @@ describe("ChiseiBot", () => {
 				return blacklist.has(userId) ? [{ user_id: userId }] : [];
 			}
 			if (query.includes("INSERT INTO learned_posts")) {
-				return [{ post_id: values[0] as string }];
+				const postId = values[0] as string;
+				if (learnedPosts.has(postId)) {
+					return [];
+				}
+				learnedPosts.add(postId);
+				return [{ post_id: postId }];
 			}
 			if (query.includes("SELECT post_id FROM replied_posts")) {
 				return [];
@@ -55,17 +61,90 @@ describe("ChiseiBot", () => {
 			raw: {} as unknown as CielClient["raw"],
 			me: vi.fn().mockResolvedValue(me),
 			timeline: vi.fn().mockResolvedValue({ items: [] }),
-			createPost: vi
-				.fn()
-				.mockResolvedValue({ id: "reply_1", content: "test" } as Post),
+			userPosts: vi.fn().mockResolvedValue({ items: [] }),
+			createPost: vi.fn().mockImplementation(async ({ content, parentId }) => ({
+				id: "reply_1",
+				content,
+				parentId,
+				author: me,
+				createdAt: "",
+			})),
 			addReaction: vi.fn().mockResolvedValue(undefined),
 			updateBio: vi.fn().mockResolvedValue(me),
 		};
 
 		const markov = new MarkovModel();
 
-		return { sql, client, blacklist, markov };
+		return { sql, client, blacklist, learnedPosts, markov };
 	}
+
+	it("learns its own posts once without replying", async () => {
+		const { sql, client, learnedPosts, markov } = createMockSetup();
+		const bot = new ChiseiBot(sql, client, me, markov, []);
+		const learn = vi.spyOn(markov, "learn");
+		const post = {
+			id: "self_1",
+			content: "ことばで遊ぶ",
+			author: me,
+			createdAt: "",
+		} as Post;
+
+		await bot.handlePost(post);
+		await bot.handlePost(post);
+
+		expect(learnedPosts.has(post.id)).toBe(true);
+		expect(learn).toHaveBeenCalledTimes(1);
+		expect(learn).toHaveBeenCalledWith(sql, expect.any(Array), me.id);
+		expect(client.createPost).not.toHaveBeenCalled();
+	});
+
+	it("loads every page of its own post history", async () => {
+		const { sql, client, learnedPosts, markov } = createMockSetup();
+		const first = {
+			id: "self_old",
+			content: "ころころ言葉",
+			author: me,
+			createdAt: "",
+		} as Post;
+		const second = { ...first, id: "self_new", content: "言葉ころり" };
+		vi.mocked(client.userPosts)
+			.mockResolvedValueOnce({ items: [second], nextCursor: "older" })
+			.mockResolvedValueOnce({ items: [first] });
+		const bot = new ChiseiBot(sql, client, me, markov, []);
+
+		await bot.learnOwnHistory();
+
+		expect(client.userPosts).toHaveBeenNthCalledWith(1, me.username, {
+			limit: 100,
+			cursor: undefined,
+		});
+		expect(client.userPosts).toHaveBeenNthCalledWith(2, me.username, {
+			limit: 100,
+			cursor: "older",
+		});
+		expect(learnedPosts).toEqual(new Set(["self_old", "self_new"]));
+	});
+
+	it.each([
+		[0.29, 1],
+		[0.3, undefined],
+	])(
+		"uses the bot persona with the 30/70 length split at random=%s",
+		async (random, maxTokens) => {
+			const { sql, client, learnedPosts, markov } = createMockSetup();
+			const generate = vi.spyOn(markov, "generate").mockReturnValue(["ころり"]);
+			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(random);
+			try {
+				const bot = new ChiseiBot(sql, client, me, markov, []);
+				await bot.postSolo();
+
+				expect(generate).toHaveBeenCalledWith([], me.id, maxTokens);
+				expect(learnedPosts.has("reply_1")).toBe(true);
+			} finally {
+				randomSpy.mockRestore();
+			}
+		},
+	);
 
 	it("handles '学習禁止' command by adding user to blacklist and reacting with 👍", async () => {
 		const { sql, client, blacklist, markov } = createMockSetup();

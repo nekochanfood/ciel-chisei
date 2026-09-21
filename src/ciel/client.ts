@@ -5,6 +5,7 @@ import type { components, paths } from "../generated/api.js";
 export type Post = components["schemas"]["Post"];
 export type User = components["schemas"]["User"];
 export type TimelinePage = components["schemas"]["TimelinePage"];
+export type UserPostsPage = components["schemas"]["UserPostsPage"];
 export type CielClient = {
 	raw: Client<paths>;
 	me(): Promise<User>;
@@ -12,6 +13,10 @@ export type CielClient = {
 		limit?: number;
 		cursor?: string | null;
 	}): Promise<TimelinePage>;
+	userPosts(
+		username: string,
+		params?: { limit?: number; cursor?: string | null },
+	): Promise<UserPostsPage>;
 	createPost(body: { content: string; parentId?: string }): Promise<Post>;
 	addReaction(postId: string, emoji: string): Promise<void>;
 	updateBio(bio: string): Promise<User>;
@@ -51,6 +56,24 @@ export function createCielClient(config: Config): CielClient {
 					(response as Response)?.status ?? 500,
 					error,
 				);
+			}
+			return data;
+		},
+		async userPosts(username, params = {}) {
+			const { data, error, response } = await raw.GET(
+				"/users/{username}/posts",
+				{
+					params: {
+						path: { username },
+						query: {
+							limit: params.limit,
+							cursor: params.cursor ?? undefined,
+						},
+					},
+				},
+			);
+			if (error || !data) {
+				throw httpError(`GET /users/${username}/posts`, response.status, error);
 			}
 			return data;
 		},

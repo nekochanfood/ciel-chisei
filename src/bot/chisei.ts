@@ -17,6 +17,8 @@ import {
 } from "./text.js";
 import { joinTokens, tokenize } from "./tokenizer.js";
 
+const SHORT_UTTERANCE_RATE = 0.3;
+
 export class ChiseiBot {
 	private readonly inFlight = new Set<string>();
 	private lastSyncedBioKey = "";
@@ -78,7 +80,11 @@ export class ChiseiBot {
 	}
 
 	async handlePost(post: Post): Promise<void> {
-		if (post.deletedAt || isOwnPost(post, this.me.id)) {
+		if (post.deletedAt) {
+			return;
+		}
+		if (isOwnPost(post, this.me.id)) {
+			await this.learn(post);
 			return;
 		}
 
@@ -122,6 +128,22 @@ export class ChiseiBot {
 		await this.reply(post);
 	}
 
+	async learnOwnHistory(): Promise<void> {
+		let cursor: string | null | undefined;
+		do {
+			const page = await this.client.userPosts(this.me.username, {
+				limit: 100,
+				cursor,
+			});
+			for (const post of [...page.items].reverse()) {
+				if (!post.deletedAt && isOwnPost(post, this.me.id)) {
+					await this.learn(post);
+				}
+			}
+			cursor = page.nextCursor;
+		} while (cursor);
+	}
+
 	private async learn(post: Post): Promise<void> {
 		const inserted = await this.sql<{ post_id: string }[]>`
       INSERT INTO learned_posts (post_id, author_id)
@@ -139,11 +161,12 @@ export class ChiseiBot {
 
 	async postSolo(): Promise<void> {
 		try {
-			const generated = this.markov.generate();
+			const generated = this.generateSpeech();
 			const body =
 				generated.length > 0 ? joinTokens(generated) : pickFallback();
 			const content = clipContent(body);
 			const post = await this.client.createPost({ content });
+			await this.rememberOwnPost(post);
 			console.info(`[bot] posted solo as ${post.id}: ${content}`);
 		} catch (error) {
 			console.error("[bot] failed to post solo", error);
@@ -164,7 +187,7 @@ export class ChiseiBot {
 		this.inFlight.add(post.id);
 		try {
 			const seed = await tokenize(post.content);
-			const generated = this.markov.generate(seed, post.author.id);
+			const generated = this.generateSpeech(seed);
 			const body =
 				generated.length > 0 ? joinTokens(generated) : pickFallback();
 			const content = buildReply(this.me.username, post.author.username, body);
@@ -178,11 +201,25 @@ export class ChiseiBot {
         VALUES (${post.id}, ${reply.id})
         ON CONFLICT (post_id) DO NOTHING
       `;
+			await this.rememberOwnPost(reply);
 			console.info(`[bot] replied to ${post.id} as ${reply.id}: ${content}`);
 		} catch (error) {
 			console.error(`[bot] reply failed for ${post.id}`, error);
 		} finally {
 			this.inFlight.delete(post.id);
+		}
+	}
+
+	private generateSpeech(seed: string[] = []): string[] {
+		const maxTokens = Math.random() < SHORT_UTTERANCE_RATE ? 1 : undefined;
+		return this.markov.generate(seed, this.me.id, maxTokens);
+	}
+
+	private async rememberOwnPost(post: Post): Promise<void> {
+		try {
+			await this.learn(post);
+		} catch (error) {
+			console.warn(`[bot] failed to learn own post ${post.id}`, error);
 		}
 	}
 }
