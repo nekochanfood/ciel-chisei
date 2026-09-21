@@ -31,7 +31,7 @@ ciel-chisei/
 │       ├── tokenizer.ts     # mfm-js parsing + BudouX segmentation
 │       └── text.ts          # mention detection, opt commands, reply formatting, formatBio
 ├── Dockerfile               # never COPY config.yaml; runtime reads the mounted file
-└── docker-compose.yml       # bot (mounts ./config.yaml ro, --config flag) + PostgreSQL
+└── docker-compose.yml.example # copy to docker-compose.yml (gitignored); bot + PostgreSQL
 ```
 
 ## Ciel API facts agents must not rediscover the hard way
@@ -50,7 +50,8 @@ OpenAPI lives in the Ciel repo at `packages/api/openapi.yml` with `$ref`s under 
 ## Commands
 
 ```bash
-cp config.yaml.example config.yaml   # then edit ciel.accessToken / database.url
+cp config.yaml.example config.yaml             # then edit ciel.accessToken / database.url
+cp docker-compose.yml.example docker-compose.yml # real compose file is gitignored
 npm install
 npm run gen:openapi    # network: GitHub tarball + openapi-typescript
 npm test               # vitest

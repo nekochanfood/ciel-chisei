@@ -7,6 +7,10 @@ services:
       POSTGRES_DB: ciel_chisei
     volumes:
       - chisei_pg:/var/lib/postgresql/data
+    # ホストに ports を公開しない。別スタックの postgres (ciel-db 等) と
+    # ポートも名前解決も衝突させないため、bot との通信は専用 net 内に閉じる。
+    networks:
+      - chisei_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ciel_chisei -d ciel_chisei"]
       interval: 5s
@@ -21,9 +25,12 @@ services:
     # .env は使わない。DB 接続先など全て config.yaml に書く。
     # compose で使う場合は database.url を
     # postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei にすること。
+    # 専用 net 内では `db` はこの compose の postgres のみに解決される。
     command: ["node", "dist/index.js", "--config", "/app/config.yaml"]
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+    networks:
+      - chisei_net
     depends_on:
       db:
         condition: service_healthy
@@ -33,3 +40,7 @@ services:
 
 volumes:
   chisei_pg:
+
+networks:
+  chisei_net:
+    driver: bridge

@@ -67,9 +67,12 @@ npm run dev
 
 ```bash
 cp config.yaml.example config.yaml
-# database.url を postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei にする
+cp docker-compose.yml.example docker-compose.yml
+# config.yaml の database.url を postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei にする
 docker compose up --build
 ```
+
+`docker-compose.yml` も `config.yaml` 同様、example をコピーして使う運用です（実ファイルは git 管理外）。
 
 - ホストの `./config.yaml` をコンテナの `/app/config.yaml` に read-only マウントして読みます。
 - イメージに `config.yaml` は含めません（`.dockerignore` で除外、`Dockerfile` で `COPY` しない）。
