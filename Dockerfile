@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates tar \
+  && apt-get install -y --no-install-recommends ca-certificates openssl tar \
   && rm -rf /var/lib/apt/lists/*
 
 # config.yaml は絶対に COPY しない (アクセストークンを含むため)。
@@ -25,6 +25,10 @@ RUN npm run build
 FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
