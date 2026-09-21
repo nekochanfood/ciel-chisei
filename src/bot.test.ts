@@ -665,6 +665,36 @@ describe("ChiseiBot", () => {
 		}
 	});
 
+	it("keeps long-form replies whole even on playful rolls", async () => {
+		const { db, client, markov } = createMockSetup();
+		const bot = new ChiseiBot(db, client, me, markov, [], {
+			replyMinTokens: 50,
+			replyMaxTokens: 100,
+		});
+		const long = Array.from({ length: 20 }, (_, i) => `t${i}`);
+		const generate = vi.spyOn(markov, "generate").mockReturnValue(long);
+		stubPostableOutput(markov);
+		// rate通過→playful成立の目でも長文は短縮しない
+		const random = vi.spyOn(Math, "random").mockReturnValue(0.1);
+		try {
+			await bot.handlePost({
+				id: "post_long",
+				content: "@chisei 長文で語って",
+				author: { id: "user_long", username: "ivy", createdAt: "" },
+				createdAt: "",
+				mentions: [{ username: "chisei" }],
+			} as Post);
+			// 目標50トークンで生成を呼び、文末装飾も切り詰めもしない
+			expect(generate.mock.calls[0][2]).toBe(50);
+			expect(client.createPost).toHaveBeenCalledTimes(1);
+			const posted = vi.mocked(client.createPost).mock.calls[0][0]
+				.content as string;
+			expect(posted.endsWith("t19")).toBe(true);
+		} finally {
+			random.mockRestore();
+		}
+	});
+
 	it("posts well-formed replies over many real generations (bot behavior)", async () => {
 		const { FALLBACKS } = await import("./bot/text.js");
 		const { tokenize } = await import("./bot/tokenizer.js");

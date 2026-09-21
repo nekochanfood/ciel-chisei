@@ -24,10 +24,18 @@ import {
 } from "./tokenizer.js";
 
 const SHORT_UTTERANCE_RATE = 0.3;
+/** この目標長を超えたら長文扱い (短縮装飾を抑止)。短文の既定挙動は変えない。 */
+const LONGFORM_THRESHOLD_TOKENS = 12;
+/** clip 予算の目安 (1トークンあたり文字数)。 */
+const CHARS_PER_TOKEN = 4;
+/** 長文かどうか。 */
+function isLongform(maxTokens?: number): boolean {
+	return (maxTokens ?? 0) > LONGFORM_THRESHOLD_TOKENS;
+}
 /** 発話時の装飾レイヤー (学習時は句読点を除去しているためここで付与する)。全角で統一する。 */
 const PLAYFUL_ENDINGS = ["！", "…", "？", "。", "、"] as const;
-/** 1文あたりの学習上限トークン数 (異常な長文の丸暗記を防ぐ)。 */
-const MAX_LEARN_TOKENS = 48;
+/** 1文あたりの学習上限トークン数 (異常な長文の丸暗記を防ぐ)。長文生成の材料にするため余裕を持たせる。 */
+const MAX_LEARN_TOKENS = 200;
 
 export type ChiseiBotOptions = {
 	/** 0..1。メンション・合言葉への返信確率。1で必ず返信。 */
@@ -266,10 +274,16 @@ export class ChiseiBot {
 				),
 			);
 			const speech = this.generateSpeech(seed, targetTokens);
+			// 長文目標では文字切り詰めの予算も広げる (目安: 1トークン4文字)
+			const maxChars = Math.max(
+				300,
+				targetTokens * CHARS_PER_TOKEN + post.author.username.length + 2,
+			);
 			const content = buildReply(
 				this.me.username,
 				post.author.username,
 				speech.text,
+				maxChars,
 			);
 			await delay(400 + Math.floor(Math.random() * 1200));
 			const reply = await this.client.createPost({
@@ -403,7 +417,10 @@ export class ChiseiBot {
 		const playful = Math.random() < SHORT_UTTERANCE_RATE;
 		const generated = this.tryGenerate(seed, maxTokens);
 		if (generated.length === 0) return { text: pickFallback(), ok: false };
-		if (!playful) return { text: joinTokens(generated), ok: true };
+		// 長文目標では短縮・見出し化の装飾をしない (長さを守る)
+		if (!playful || isLongform(maxTokens)) {
+			return { text: joinTokens(generated), ok: true };
+		}
 
 		const ending =
 			PLAYFUL_ENDINGS[Math.floor(Math.random() * PLAYFUL_ENDINGS.length)] ??

@@ -35,6 +35,7 @@ bot:
   # 0..1。独り言タイマー tick ごとの投稿確率。1で毎回投稿。
   soloPostRate: 1
   # 返信の長さ = 相手の文のトークン数 × この係数。min/max で丸める。
+  # 上限は 500 まで (12超で長文扱い: 短縮装飾なし・切り上げ抑制・ban緩和)。
   replyLengthFactor: 1
   replyMinTokens: 2
   replyMaxTokens: 24

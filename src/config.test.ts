@@ -81,6 +81,20 @@ database:
 		expect(config.logLevel).toBe("info");
 	});
 
+	it("allows long-form reply lengths up to 500", () => {
+		const path = writeYaml(`
+ciel:
+  apiBaseUrl: http://localhost:6137
+  accessToken: t
+database:
+  url: postgres://u:p@localhost/db
+bot:
+  replyMaxTokens: 500
+`);
+		const config = loadConfig({ configPath: path });
+		expect(config.replyMaxTokens).toBe(500);
+	});
+
 	it("allows disabling solo posts with 0", () => {
 		const path = writeYaml(`
 ciel:

@@ -48,6 +48,9 @@ const DEFAULT_OPTIONS: MarkovOptions = {
 /** 文末に許される助詞の細分類 (終助詞・副助詞・間投助詞以外は文が続くはずなので ban)。 */
 const PARTICLE_END_OK = new Set(["終助詞", "副助詞", "間投助詞"]);
 
+/** 部分丸暗記検出に使う最大 N-gram 長 (長文用に 4..12 を記録する)。 */
+const MAX_BANNED_NGRAM = 12;
+
 /** 品詞カテゴリ別の文末適格判定。false = そのトークンで終わると不自然な断片になる。 */
 export function isBadEndingTag(pos: string, detail: string): boolean {
 	switch (pos) {
@@ -266,7 +269,11 @@ export class MarkovModel {
 		return STANDALONE_POS.has(tag.pos);
 	}
 
-	/** 学習文の丸暗記かどうか (完全一致 or 長い連続一致)。 */
+	/**
+	 * 学習文の丸暗記かどうか (完全一致 or 長い連続一致)。
+	 * 長文は短い一致では丸暗記とみなさない (要求長の1/5以上にスケール、
+	 * 上限12)。短文時は従来通り maxVerbatimNgram。
+	 */
 	isBannedSequence(tokens: string[]): boolean {
 		if (tokens.length === 0) {
 			return false;
@@ -274,7 +281,10 @@ export class MarkovModel {
 		if (this.sequences.has(sequenceKey(tokens))) {
 			return true;
 		}
-		const n = this.options.maxVerbatimNgram;
+		const n = Math.min(
+			MAX_BANNED_NGRAM,
+			Math.max(this.options.maxVerbatimNgram, Math.floor(tokens.length / 5)),
+		);
 		if (tokens.length >= n) {
 			for (let i = 0; i + n <= tokens.length; i += 1) {
 				if (this.bannedNgrams.has(sequenceKey(tokens.slice(i, i + n)))) {
@@ -495,7 +505,12 @@ export class MarkovModel {
 		const limit = maxTokens ?? this.options.maxTokens;
 		const guardVerbatim =
 			this.options.preventVerbatim && this.options.variety > 0;
-		for (let attempt = 0; attempt < this.options.maxAttempts; attempt += 1) {
+		// 長文生成は ban に当たりやすい分だけ試行を増やす
+		const attempts =
+			limit > DEFAULT_OPTIONS.maxTokens
+				? this.options.maxAttempts * 2
+				: this.options.maxAttempts;
+		for (let attempt = 0; attempt < attempts; attempt += 1) {
 			const output = this.generateOnce(seedTokens, authorId, limit);
 			if (output.length === 0) {
 				continue;
@@ -514,7 +529,11 @@ export class MarkovModel {
 		maxTokens: number,
 	): string[] {
 		let prefix = this.randomStartPrefix(seedTokens);
-		const stopProbability = 0.35 * this.options.variety;
+		// 長文生成では切り上げ確率を抑え、短文時の挙動は変えない
+		const stopProbability =
+			maxTokens > DEFAULT_OPTIONS.maxTokens
+				? 0.35 * this.options.variety * (DEFAULT_OPTIONS.maxTokens / maxTokens)
+				: 0.35 * this.options.variety;
 		const output: string[] = [];
 		for (let i = 0; i < maxTokens; i += 1) {
 			const next = this.pickNext(prefix, seedTokens, authorId);
@@ -617,9 +636,10 @@ export class MarkovModel {
 			return;
 		}
 		this.sequences.add(sequenceKey(tokens));
-		const n = this.options.maxVerbatimNgram;
-		for (let i = 0; i + n <= tokens.length; i += 1) {
-			this.bannedNgrams.add(sequenceKey(tokens.slice(i, i + n)));
+		for (let n = this.options.maxVerbatimNgram; n <= MAX_BANNED_NGRAM; n += 1) {
+			for (let i = 0; i + n <= tokens.length; i += 1) {
+				this.bannedNgrams.add(sequenceKey(tokens.slice(i, i + n)));
+			}
 		}
 	}
 

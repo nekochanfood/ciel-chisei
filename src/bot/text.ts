@@ -100,6 +100,7 @@ export function buildReply(
 	botUsername: string,
 	targetUsername: string,
 	body: string,
+	maxChars = 300,
 ): string {
 	const mention = `@${targetUsername}`;
 	const cleaned = body
@@ -109,7 +110,7 @@ export function buildReply(
 	const withMention = spoken.startsWith(mention)
 		? spoken
 		: `${mention} ${spoken}`;
-	return clipContent(withMention);
+	return clipContent(withMention, maxChars);
 }
 
 export function pickFallback(): string {

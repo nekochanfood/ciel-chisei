@@ -21,6 +21,8 @@ async function main(): Promise<void> {
 	const markov = new MarkovModel({
 		temperature: config.temperature,
 		variety: config.variety,
+		// 通常長リトライの上限も返信長に追従させる (長文設定で短く切り詰めない)
+		maxTokens: config.replyMaxTokens,
 	});
 	await markov.load(db);
 

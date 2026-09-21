@@ -24,7 +24,7 @@ const yamlSchema = z.object({
 			soloPostRate: z.number().min(0).max(1).default(1),
 			replyLengthFactor: z.number().positive().max(5).default(1),
 			replyMinTokens: z.number().int().min(1).default(2),
-			replyMaxTokens: z.number().int().min(1).max(100).default(24),
+			replyMaxTokens: z.number().int().min(1).max(500).default(24),
 			temperature: z.number().positive().max(5).default(1.8),
 			variety: z.number().min(0).max(1).default(0.8),
 		})

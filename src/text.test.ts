@@ -51,6 +51,15 @@ describe("buildReply", () => {
 		expect(reply.startsWith("@neko ")).toBe(true);
 		expect(reply.length).toBeLessThanOrEqual(300);
 	});
+
+	it("widens the clip budget for long-form replies", () => {
+		const long = "あ".repeat(400);
+		expect(buildReply("chisei", "neko", long).length).toBeLessThanOrEqual(300);
+		const widened = buildReply("chisei", "neko", long, 500);
+		expect(widened.startsWith("@neko ")).toBe(true);
+		expect(widened.endsWith("あ")).toBe(true);
+		expect(widened.length).toBeLessThanOrEqual(500);
+	});
 });
 
 describe("parseOptCommand", () => {
@@ -430,6 +439,23 @@ describe("MarkovModel", () => {
 		expect(model.isBannedSequence(["x", "b", "z"])).toBe(false);
 		model.ingest(["x", "b", "z"]);
 		expect(model.isBannedSequence(["x", "b", "z"])).toBe(true);
+	});
+
+	it("scales the verbatim window for long outputs", () => {
+		const model = new MarkovModel({ maxVerbatimNgram: 4 });
+		const learned = Array.from({ length: 30 }, (_, i) => `a${i}`);
+		model.ingest(learned);
+		const fresh = Array.from({ length: 26 }, (_, i) => `b${i}`);
+		// 30トークン出力の要求長は6。4連続の共有は丸暗記とみなさない
+		expect(model.isBannedSequence([...learned.slice(0, 4), ...fresh])).toBe(
+			false,
+		);
+		// 6連続の共有は丸暗記とみなす
+		expect(
+			model.isBannedSequence([...learned.slice(0, 6), ...fresh.slice(0, 24)]),
+		).toBe(true);
+		// 学習文そのものの完全一致は長さに関わらず ban
+		expect(model.isBannedSequence(learned)).toBe(true);
 	});
 
 	it("uses POS categories to avoid fragmentary endings and starts", () => {
