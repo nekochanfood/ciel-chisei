@@ -7,6 +7,9 @@ export function createSql(databaseUrl: string): Sql {
 		max: 8,
 		idle_timeout: 20,
 		connect_timeout: 30,
+		// CREATE TABLE IF NOT EXISTS の "already exists" NOTICE (42P07) を
+		// 毎起動ログに出さない。異常は error として別途扱われる。
+		onnotice: () => {},
 	});
 }
 

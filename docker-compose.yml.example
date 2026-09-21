@@ -31,6 +31,10 @@ services:
       - ./config.docker.yaml:/app/config.yaml:ro
     networks:
       - chisei_net
+    # Docker Desktop 以外 (Linux Engine 等) では host.docker.internal が
+    # 引けないため、ホストゲートウェイに明示マッピングする。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
