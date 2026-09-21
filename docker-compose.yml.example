@@ -26,7 +26,7 @@ services:
     # compose で使う場合は database.url を
     # postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei にすること。
     # 専用 net 内では `db` はこの compose の postgres のみに解決される。
-    command: ["node", "dist/index.js", "--config", "/app/config.yaml"]
+    command: ["npm", "start", "--", "--config", "/app/config.yaml"]
     volumes:
       - ./config.docker.yaml:/app/config.yaml:ro
     networks:

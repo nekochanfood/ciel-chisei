@@ -4,24 +4,23 @@ import { loadTokenizer } from "./bot/tokenizer.js";
 import { createCielClient } from "./ciel/client.js";
 import { connectRealtime } from "./ciel/websocket.js";
 import { loadConfig } from "./config.js";
-import { createSql, migrate, waitForDatabase } from "./db.js";
+import { createDb, waitForDatabase } from "./db.js";
 import { startHealthServer } from "./health.js";
 
 async function main(): Promise<void> {
 	const config = loadConfig();
-	const sql = createSql(config.databaseUrl);
+	const db = createDb(config.databaseUrl);
 	let ready = false;
 	const health = startHealthServer(config.port, () => ready);
 
-	await waitForDatabase(sql);
-	await migrate(sql);
+	await waitForDatabase(db);
 	await loadTokenizer();
 
 	const markov = new MarkovModel({
 		temperature: config.temperature,
 		variety: config.variety,
 	});
-	await markov.load(sql);
+	await markov.load(db);
 
 	const client = createCielClient(config);
 	const me = await client.me();
@@ -29,7 +28,7 @@ async function main(): Promise<void> {
 		`[bot] logged in as @${me.username} (${me.id}), markov edges=${markov.edgeCount}`,
 	);
 
-	const bot = new ChiseiBot(sql, client, me, markov, config.wakeWords);
+	const bot = new ChiseiBot(db, client, me, markov, config.wakeWords);
 
 	const seen = new Set<string>();
 	const handle = async (
@@ -83,7 +82,7 @@ async function main(): Promise<void> {
 		}
 		stopWs();
 		health.close();
-		await sql.end({ timeout: 5 });
+		await db.$disconnect();
 		process.exit(0);
 	};
 	process.on("SIGINT", () => void shutdown());

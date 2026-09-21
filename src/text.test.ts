@@ -221,6 +221,30 @@ describe("MFM parsing and tokenization", () => {
 });
 
 describe("MarkovModel", () => {
+	it("labels observed token positions", () => {
+		const model = new MarkovModel();
+		model.ingest(["クライアントは", "動く"]);
+
+		expect(model.canStart("クライアントは")).toBe(true);
+		expect(model.canEnd("クライアントは")).toBe(false);
+		expect(model.canStart("動く")).toBe(false);
+		expect(model.canEnd("動く")).toBe(true);
+	});
+
+	it("does not stop early on a token never observed at the end", () => {
+		const random = vi.spyOn(Math, "random").mockReturnValue(0);
+		try {
+			const model = new MarkovModel({ variety: 1, temperature: 1 });
+			model.ingest(["これは", "つまり", "クライアントは", "動く"]);
+
+			const output = model.generate([]);
+			expect(output.at(-1)).toBe("動く");
+			expect(output).toContain("クライアントは");
+		} finally {
+			random.mockRestore();
+		}
+	});
+
 	it("generates tokens after learning", () => {
 		const model = new MarkovModel();
 		model.ingest(["今日", "は", "いい", "天気"]);

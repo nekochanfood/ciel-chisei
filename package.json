@@ -1,40 +1,50 @@
 {
-  "name": "ciel-chisei",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "description": "Ciel 向けの知性bot風おしゃべりボット。生成AIは使わず、タイムラインから言葉を覚える。",
-  "engines": {
-    "node": ">=22"
-  },
-  "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "gen:openapi": "node scripts/sync-openapi.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "biome check src scripts",
-    "format": "biome format --write src scripts"
-  },
-  "dependencies": {
-    "budoux": "^0.9.2",
-    "js-yaml": "^5.4.2",
-    "mfm-js": "^0.26.0",
-    "openapi-fetch": "^0.13.4",
-    "postgres": "^3.4.5",
-    "ws": "^8.18.0",
-    "zod": "^3.24.2"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^22.13.4",
-    "@types/ws": "^8.5.14",
-    "openapi-typescript": "^7.6.1",
-    "tsx": "^4.19.3",
-    "typescript": "^5.7.3",
-    "vitest": "^3.0.6"
-  }
+	"name": "ciel-chisei",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "Ciel 向けの知性bot風おしゃべりボット。生成AIは使わず、タイムラインから言葉を覚える。",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"dev": "node scripts/start.mjs dev",
+		"build": "prisma generate && tsc -p tsconfig.json",
+		"start": "node scripts/start.mjs start",
+		"pretest": "prisma generate",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"gen:openapi": "node scripts/sync-openapi.mjs",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"lint": "biome check src scripts",
+		"format": "biome format --write src scripts",
+		"db:generate": "prisma generate",
+		"db:migrate": "node scripts/prisma.mjs migrate dev",
+		"db:deploy": "node scripts/prisma.mjs migrate deploy",
+		"db:studio": "node scripts/prisma.mjs studio",
+		"db:validate": "prisma validate"
+	},
+	"dependencies": {
+		"@prisma/adapter-pg": "^7.9.1",
+		"@prisma/client": "^7.9.1",
+		"budoux": "^0.9.2",
+		"js-yaml": "^5.4.2",
+		"mfm-js": "^0.26.0",
+		"openapi-fetch": "^0.13.4",
+		"pg": "^8.23.0",
+		"prisma": "^7.9.1",
+		"ws": "^8.18.0",
+		"zod": "^3.24.2"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.14",
+		"@types/js-yaml": "^4.0.9",
+		"@types/node": "^22.13.4",
+		"@types/pg": "^8.23.1",
+		"@types/ws": "^8.5.14",
+		"openapi-typescript": "^7.6.1",
+		"tsx": "^4.19.3",
+		"typescript": "^5.7.3",
+		"vitest": "^3.0.6"
+	}
 }

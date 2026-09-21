@@ -1,9 +1,9 @@
 import type { CielClient, Post, User } from "../ciel/client.js";
 import {
 	addBlacklist,
+	type Db,
 	isBlacklisted,
 	removeBlacklist,
-	type Sql,
 } from "../db.js";
 import type { MarkovModel } from "./markov.js";
 import {
@@ -18,6 +18,7 @@ import {
 import { joinTokens, tokenize } from "./tokenizer.js";
 
 const SHORT_UTTERANCE_RATE = 0.3;
+const PLAYFUL_ENDINGS = ["!", "...", "?", "。", "、"] as const;
 
 export class ChiseiBot {
 	private readonly inFlight = new Set<string>();
@@ -25,7 +26,7 @@ export class ChiseiBot {
 	private bioSyncTimer?: NodeJS.Timeout;
 
 	constructor(
-		private readonly sql: Sql,
+		private readonly db: Db,
 		private readonly client: CielClient,
 		private readonly me: User,
 		private readonly markov: MarkovModel,
@@ -52,20 +53,10 @@ export class ChiseiBot {
 	}
 
 	private async lastLearnedAt(): Promise<Date | null> {
-		const rows = await this.sql<{ last_learned_at: unknown }[]>`
-      SELECT MAX(learned_at) AS last_learned_at FROM learned_posts
-    `;
-		const raw = rows[0]?.last_learned_at;
-		if (raw instanceof Date && !Number.isNaN(+raw)) {
-			return raw;
-		}
-		if (typeof raw === "string" && raw.length > 0) {
-			const parsed = new Date(raw);
-			if (!Number.isNaN(+parsed)) {
-				return parsed;
-			}
-		}
-		return null;
+		const result = await this.db.learnedPost.aggregate({
+			_max: { learnedAt: true },
+		});
+		return result._max.learnedAt;
 	}
 
 	requestBioSync(): void {
@@ -91,7 +82,7 @@ export class ChiseiBot {
 		// Check opt-out / opt-in commands
 		const optCmd = parseOptCommand(post, this.me.username);
 		if (optCmd === "opt_out") {
-			await addBlacklist(this.sql, post.author.id);
+			await addBlacklist(this.db, post.author.id);
 			try {
 				await this.client.addReaction(post.id, "👍");
 			} catch (e) {
@@ -104,7 +95,7 @@ export class ChiseiBot {
 		}
 
 		if (optCmd === "opt_in") {
-			await removeBlacklist(this.sql, post.author.id);
+			await removeBlacklist(this.db, post.author.id);
 			try {
 				await this.client.addReaction(post.id, "👍");
 			} catch (e) {
@@ -117,7 +108,7 @@ export class ChiseiBot {
 		}
 
 		// Check if author is blacklisted
-		const blacklisted = await isBlacklisted(this.sql, post.author.id);
+		const blacklisted = await isBlacklisted(this.db, post.author.id);
 		if (!blacklisted) {
 			await this.learn(post);
 		}
@@ -145,26 +136,24 @@ export class ChiseiBot {
 	}
 
 	private async learn(post: Post): Promise<void> {
-		const inserted = await this.sql<{ post_id: string }[]>`
-      INSERT INTO learned_posts (post_id, author_id)
-      VALUES (${post.id}, ${post.author.id})
-      ON CONFLICT (post_id) DO NOTHING
-      RETURNING post_id
-    `;
-		if (inserted.length === 0) {
-			return;
-		}
 		const tokens = await tokenize(post.content);
-		await this.markov.learn(this.sql, tokens, post.author.id);
+		const learned = await this.db.$transaction(async (tx) => {
+			const inserted = await tx.learnedPost.createMany({
+				data: [{ postId: post.id, authorId: post.author.id }],
+				skipDuplicates: true,
+			});
+			if (inserted.count === 0) return false;
+			await this.markov.persist(tx, tokens, post.author.id);
+			return true;
+		});
+		if (!learned) return;
+		this.markov.ingest(tokens, post.author.id);
 		this.requestBioSync();
 	}
 
 	async postSolo(): Promise<void> {
 		try {
-			const generated = this.generateSpeech();
-			const body =
-				generated.length > 0 ? joinTokens(generated) : pickFallback();
-			const content = clipContent(body);
+			const content = clipContent(this.generateSpeech());
 			const post = await this.client.createPost({ content });
 			await this.rememberOwnPost(post);
 			console.info(`[bot] posted solo as ${post.id}: ${content}`);
@@ -177,30 +166,27 @@ export class ChiseiBot {
 		if (this.inFlight.has(post.id)) {
 			return;
 		}
-		const already = await this.sql<{ post_id: string }[]>`
-      SELECT post_id FROM replied_posts WHERE post_id = ${post.id}
-    `;
-		if (already.length > 0) {
+		const already = await this.db.repliedPost.findUnique({
+			where: { postId: post.id },
+		});
+		if (already) {
 			return;
 		}
 
 		this.inFlight.add(post.id);
 		try {
 			const seed = await tokenize(post.content);
-			const generated = this.generateSpeech(seed);
-			const body =
-				generated.length > 0 ? joinTokens(generated) : pickFallback();
+			const body = this.generateSpeech(seed);
 			const content = buildReply(this.me.username, post.author.username, body);
 			await delay(400 + Math.floor(Math.random() * 1200));
 			const reply = await this.client.createPost({
 				content,
 				parentId: post.id,
 			});
-			await this.sql`
-        INSERT INTO replied_posts (post_id, reply_id)
-        VALUES (${post.id}, ${reply.id})
-        ON CONFLICT (post_id) DO NOTHING
-      `;
+			await this.db.repliedPost.createMany({
+				data: [{ postId: post.id, replyId: reply.id }],
+				skipDuplicates: true,
+			});
 			await this.rememberOwnPost(reply);
 			console.info(`[bot] replied to ${post.id} as ${reply.id}: ${content}`);
 		} catch (error) {
@@ -210,9 +196,25 @@ export class ChiseiBot {
 		}
 	}
 
-	private generateSpeech(seed: string[] = []): string[] {
-		const maxTokens = Math.random() < SHORT_UTTERANCE_RATE ? 1 : undefined;
-		return this.markov.generate(seed, this.me.id, maxTokens);
+	private generateSpeech(seed: string[] = []): string {
+		const playful = Math.random() < SHORT_UTTERANCE_RATE;
+		const generated = this.markov.generate(seed, this.me.id);
+		if (generated.length === 0) return pickFallback();
+		if (!playful) return joinTokens(generated);
+
+		const ending =
+			PLAYFUL_ENDINGS[Math.floor(Math.random() * PLAYFUL_ENDINGS.length)] ??
+			"。";
+		if (ending === "、") {
+			const continuation = this.markov.generate(seed, this.me.id);
+			return `${joinTokens([generated[0] as string])}、${
+				continuation.length > 0 ? joinTokens(continuation) : pickFallback()
+			}`;
+		}
+		const spoken = this.markov.canEnd(generated[0] as string)
+			? joinTokens([generated[0] as string])
+			: joinTokens(generated);
+		return `${spoken}${ending}`;
 	}
 
 	private async rememberOwnPost(post: Post): Promise<void> {

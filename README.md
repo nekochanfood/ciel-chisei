@@ -16,10 +16,10 @@ Ciel（[bettaworx/ciel](https://github.com/bettaworx/ciel)）向けの、知性b
 - mfm-js で MFM をパースしてから学習（装飾・メンション・URL・コードを除外、絵文字/カスタム絵文字 `:name:` は保持）
 - BudouX で日本語を文節寄りに分割
 - 自分が実際に使った言い回しを優先し、Bot 固有の話し方へ自己パーソナライズ
-- 30% は単語・短い断片、70% は再結合した文章として言葉遊びをする
+- 30% は学習語を `!` / `...` / `?` / `。` / `、` で読み替え、70% は再結合した文章として言葉遊びをする
 - プロフィールの自己紹介に `覚えた言葉: N` を自動反映
 - 定期的な独り言（分単位で調整可、`0` で無効化）
-- 学習語彙と返信履歴を PostgreSQL に保存
+- 学習語彙・文頭/文末ラベル・返信履歴を PostgreSQL に保存し、Prisma で管理
 - Docker Compose でデプロイ（設定ファイルは read-only マウント、イメージにバンドルしない）
 
 ## 必要環境
@@ -39,7 +39,7 @@ npm install
 npm run gen:openapi
 npm test
 npm run dev
-# 別パスの設定を読む場合: npx tsx src/index.ts --config /path/to/config.yaml
+# 別パスの設定を読む場合: npm run dev -- --config /path/to/config.yaml
 ```
 
 `ciel.wsOrigin` は Ciel 側の `ALLOWED_ORIGINS`（または `PUBLIC_BASE_URL`）に含まれる Origin にしてください。Ciel の WebSocket は Origin ヘッダ必須です。
@@ -63,6 +63,19 @@ npm run dev
 | `logLevel` | no | `info` | `debug` / `info` / `warn` / `error` |
 
 設定ファイルのパス解決: `--config <path>` → `CONFIG_PATH` 環境変数 → `./config.yaml` → `./config.yml`。
+
+## データベース管理
+
+起動時に未適用の Prisma migration が自動適用されます。手動で管理する場合も、接続先は `.env` ではなく同じ YAML を使います。
+
+```bash
+npm run db:migrate   # schema変更から開発用migrationを作成・適用
+npm run db:deploy    # 作成済みmigrationを適用
+npm run db:studio    # Prisma Studioを開く
+npm run db:validate  # Prisma schemaを検証
+```
+
+別の設定ファイルを使うDBコマンドでは `CONFIG_PATH=/path/to/config.yaml` を指定します。
 
 ## Docker
 
