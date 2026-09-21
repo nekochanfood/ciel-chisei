@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ciel_chisei
+      POSTGRES_PASSWORD: ciel_chisei
+      POSTGRES_DB: ciel_chisei
+    volumes:
+      - chisei_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ciel_chisei -d ciel_chisei"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  bot:
+    build: .
+    # config.yaml はイメージに含めない。ホストの ./config.yaml を
+    # コンテナの /app/config.yaml に read-only マウントして読む。
+    # .env は使わない。DB 接続先など全て config.yaml に書く。
+    # compose で使う場合は database.url を
+    # postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei にすること。
+    command: ["node", "dist/index.js", "--config", "/app/config.yaml"]
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+volumes:
+  chisei_pg:

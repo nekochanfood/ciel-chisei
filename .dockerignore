@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+config.yaml
+config.yml
+coverage
+*.md
+!README.md
+vendor

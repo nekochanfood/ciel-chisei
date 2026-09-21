@@ -1,0 +1,37 @@
+# ciel-chisei 設定ファイルの見本です。.env は使いません。
+# 使い方: cp config.example.yaml config.yaml して編集してください。
+# Docker では ./config.yaml がコンテナの /app/config.yaml に
+# read-only マウントされます。イメージ自体に config.yaml は含めません。
+# config.yaml は git にコミットしないこと (アクセストークンを含むため)。
+
+ciel:
+  # Ciel バックエンドの origin。末尾の /api/v1 はあってもなくても良い。
+  apiBaseUrl: http://localhost:6137
+  # ボット用アカウントのアクセストークン(JWT)。コミット厳禁。
+  accessToken: "CHANGE_ME"
+  # WebSocket ハンドシェイク用の Origin。Ciel 側 ALLOWED_ORIGINS に含めること。
+  wsOrigin: http://localhost:3000
+  # 任意。上書きしない場合は {origin}/ws/events が使われます。
+  # wsUrl: ws://localhost:6137/ws/events
+
+database:
+  # ローカル開発: postgres://ciel_chisei:ciel_chisei@localhost:5432/ciel_chisei
+  # Docker Compose: postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei
+  url: postgres://ciel_chisei:ciel_chisei@localhost:5432/ciel_chisei
+
+bot:
+  # メンション以外でも反応させたい語。空ならメンションのみ。
+  wakeWords: []
+  # WebSocket が切れた時の /timeline ポーリング間隔(ms)。
+  pollIntervalMs: 15000
+  # 起動時に遡って学習するページ数(1ページ=30件)。
+  timelineBackfillPages: 5
+  # 独り言の間隔(分)。0 で無効化。
+  soloPostIntervalMinutes: 120
+
+server:
+  # Docker では 8080 のままにすること (compose の ports と対応)。
+  port: 8080
+
+# debug | info | warn | error
+logLevel: info
