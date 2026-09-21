@@ -110,7 +110,7 @@ export function buildReply(
 	const withMention = spoken.startsWith(mention)
 		? spoken
 		: `${mention} ${spoken}`;
-	return clipContent(withMention, maxChars);
+	return clipContent(withMention, Math.min(maxChars, 300));
 }
 
 export function pickFallback(): string {

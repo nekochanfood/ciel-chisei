@@ -3,23 +3,15 @@ import { resolve } from "node:path";
 import * as yaml from "js-yaml";
 import pg from "pg";
 
-// 学習データ (旧粒度の丸暗記の元) を全消去して学び直すための手動スクリプト。
-// 通常は Prisma migration (20260921130000_markov_sequences) が初回デプロイ時に
-// 自動で消去する (`npm start` / Docker 起動時の `migrate deploy` 経由)。
-// 取りこぼし時や再トークン化時に手動で使う:
-//   npm run db:reset-markov -- --config ./config.yaml
-//   docker compose exec bot npm run db:reset-markov -- --config /app/config.yaml
+// 学習済み語彙・特徴・モデルを消し、タイムラインから学び直す手動スクリプト。
 
 // learned_posts (学習済み印) も消すことで、再起動後の遡及・独り言履歴で
 // 学び直しが進む。replied_posts (重複返信防止) と learning_blacklist
 // (オプトアウト) は残す。
 const TABLES = [
-	"markov_edges",
-	"markov_token_labels",
-	"markov_sequences",
-	"markov_token_pos",
-	"markov_token_forms",
-	"markov_patterns",
+	"lexemes",
+	"sentence_features",
+	"neural_models",
 	"learned_posts",
 ];
 
@@ -64,10 +56,10 @@ try {
 	for (const table of TABLES) {
 		const result = await client.query(`DELETE FROM "${table}"`);
 		console.info(
-			`[reset-markov] ${table}: deleted ${result.rowCount ?? 0} rows`,
+			`[reset-learning] ${table}: deleted ${result.rowCount ?? 0} rows`,
 		);
 	}
 } finally {
 	await client.end();
 }
-console.info("[reset-markov] done. Restart the bot to relearn from scratch.");
+console.info("[reset-learning] done. Restart the bot to relearn from scratch.");

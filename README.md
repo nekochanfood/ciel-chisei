@@ -2,7 +2,7 @@
 
 Ciel（[bettaworx/ciel](https://github.com/bettaworx/ciel)）向けの、知性bot 風おしゃべりボットです。
 
-生成AIは使いません。全体タイムラインの文章を覚えてマルコフ連鎖で話し、`@ボット名` でメンションされると返事します。会話は元投稿へのリプライとして投稿します。
+生成AIや外部LLMは使いません。全体タイムラインから語彙と話し方の特徴を覚え、正常な手書きテンプレートと小型ニューラル評価器で話します。`@ボット名` でメンションされると元投稿へのリプライとして返事します。
 
 参考: [知性bot](https://chisei.xemono.life/)
 
@@ -13,14 +13,14 @@ Ciel（[bettaworx/ciel](https://github.com/bettaworx/ciel)）向けの、知性b
 - 設定は `config.yaml` のみ（`.env` は使わない）
 - タイムラインの投稿本文に加え、自分の過去・手動・自動投稿も学習
 - `@ボット名 学習禁止` / `@ボット名 学習許可` でオプトアウト管理。処理後に👍リアクション
-- mfm-js で MFM をパースしてから学習（装飾・メンション・URL・コードを除外、絵文字/カスタム絵文字 `:name:` は保持）
-- kuromoji で日本語を形態素＋品詞に分割し、文単位で学習（句読点は学習せず発話時に全角装飾として付与）
-- 学習文の丸暗記を拒否し、形態素の繋ぎ変えでランダマイズして発話
-- 自分が実際に使った言い回しを優先し、Bot 固有の話し方へ自己パーソナライズ
-- 30% は学習語を `！` / `…` / `？` / `。` / `、` で読み替え、70% は再結合した文章として言葉遊びをする
+- mfm-js で MFM をパースしてから学習（メンション・URL・コード・絵文字を除外）
+- kuromoji で日本語を形態素＋品詞に分割し、文単位で語彙と特徴を学習
+- 100種類以上の手書きテンプレートへ学習語彙を充当し、文法とくだけたネット口調を維持
+- 小型ニューラル評価器が入力文・長さ・品詞・装飾に合う候補を選択
+- `！` / `？` / `！？` / `…` / `〜` / 括弧 / `www` / `草` を装飾として認識・生成
 - プロフィールの自己紹介に `覚えた言葉: N` を自動反映
 - 定期的な独り言（分単位で調整可、`0` で無効化）
-- 学習語彙・文頭/文末ラベル・返信履歴を PostgreSQL に保存し、Prisma で管理
+- 学習語彙・文特徴・評価器の重み・返信履歴を PostgreSQL に保存し、Prisma で管理
 - Docker Compose でデプロイ（設定ファイルは read-only マウント、イメージにバンドルしない）
 
 ## 必要環境
@@ -65,8 +65,6 @@ npm run dev
 | `bot.replyLengthFactor` | no | `1` | 返信の長さ＝相手の文のトークン数×係数。min/max で丸める |
 | `bot.replyMinTokens` | no | `2` | 返信の最小トークン数 |
 | `bot.replyMaxTokens` | no | `24` | 返信の最大トークン数 |
-| `bot.temperature` | no | `1.8` | 生成のランダム性。大きいほどレアな繋がりを拾う |
-| `bot.variety` | no | `0.8` | 学習文の逐語再現を崩す強さ。`0` で決定論的再現 |
 | `server.port` | no | `8080` | ヘルスチェック HTTP ポート。Docker では `8080` のままにすること |
 | `logLevel` | no | `info` | `debug` / `info` / `warn` / `error` |
 
@@ -102,8 +100,8 @@ docker compose up --build
 - 起動時は必ず `migrate deploy` が走るため、ローカル・Docker どちらのデプロイでも未適用 migration（kuromoji 移行時の学習データ全消去を含む）が自動適用されます。`--build` 付きで起動すること。
 - 消去が取り残された場合は手動で消去できます（再起動後に学び直します）:
   ```bash
-  npm run db:reset-markov -- --config ./config.yaml
-  docker compose exec bot npm run db:reset-markov -- --config /app/config.yaml
+  npm run db:reset-learning -- --config ./config.yaml
+  docker compose exec bot npm run db:reset-learning -- --config /app/config.yaml
   ```
 
 ## OpenAPI 型生成

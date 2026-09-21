@@ -74,8 +74,6 @@ database:
 		expect(config.replyLengthFactor).toBe(1);
 		expect(config.replyMinTokens).toBe(2);
 		expect(config.replyMaxTokens).toBe(24);
-		expect(config.temperature).toBe(1.8);
-		expect(config.variety).toBe(0.8);
 		expect(config.wsOrigin).toBe("http://localhost:3000");
 		expect(config.port).toBe(8080);
 		expect(config.logLevel).toBe("info");

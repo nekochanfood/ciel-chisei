@@ -25,8 +25,6 @@ const yamlSchema = z.object({
 			replyLengthFactor: z.number().positive().max(5).default(1),
 			replyMinTokens: z.number().int().min(1).default(2),
 			replyMaxTokens: z.number().int().min(1).max(500).default(24),
-			temperature: z.number().positive().max(5).default(1.8),
-			variety: z.number().min(0).max(1).default(0.8),
 		})
 		.default({}),
 	server: z
@@ -55,8 +53,6 @@ export type Config = {
 	replyLengthFactor: number;
 	replyMinTokens: number;
 	replyMaxTokens: number;
-	temperature: number;
-	variety: number;
 	port: number;
 	logLevel: "debug" | "info" | "warn" | "error";
 };
@@ -147,8 +143,6 @@ export function loadConfig(
 		replyLengthFactor: file.bot.replyLengthFactor,
 		replyMinTokens: file.bot.replyMinTokens,
 		replyMaxTokens: file.bot.replyMaxTokens,
-		temperature: file.bot.temperature,
-		variety: file.bot.variety,
 		port: file.server.port,
 		logLevel: file.logLevel,
 	};

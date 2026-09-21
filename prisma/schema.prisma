@@ -24,63 +24,37 @@ model RepliedPost {
   @@map("replied_posts")
 }
 
-model MarkovEdge {
-  authorId  String @default("") @map("author_id")
-  prefix    String
-  nextToken String @map("next")
-  count     Int    @default(1)
-
-  @@id([authorId, prefix, nextToken])
-  @@index([authorId, prefix], map: "markov_edges_author_prefix_idx")
-  @@index([prefix], map: "markov_edges_prefix_idx")
-  @@map("markov_edges")
-}
-
-model MarkovTokenLabel {
-  token    String  @id
-  canStart Boolean @default(false) @map("can_start")
-  canEnd   Boolean @default(false) @map("can_end")
-
-  @@map("markov_token_labels")
-}
-
-model MarkovSequence {
-  hash      String   @id
-  text      String
-  count     Int      @default(1)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
-
-  @@map("markov_sequences")
-}
-
-model MarkovTokenPos {
-  token  String
-  pos    String
-  detail String @default("")
-  count  Int    @default(1)
-
-  @@id([token, pos, detail])
-  @@map("markov_token_pos")
-}
-
-model MarkovTokenForm {
-  token       String
-  pos         String @default("")
+model Lexeme {
+  surface     String
+  pos         String
+  detail      String @default("")
   basicForm   String @default("") @map("basic_form")
   conjugation String @default("")
   count       Int    @default(1)
 
-  @@id([token, pos, basicForm, conjugation])
-  @@map("markov_token_forms")
+  @@id([surface, pos, detail, basicForm, conjugation])
+  @@index([pos], map: "lexemes_pos_idx")
+  @@map("lexemes")
 }
 
-model MarkovPattern {
-  pattern   String
-  count     Int      @default(1)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+model SentenceFeature {
+  postId        String @map("post_id")
+  sentenceIndex Int    @map("sentence_index")
+  authorId      String @map("author_id")
+  features      Json
 
-  @@id([pattern])
-  @@map("markov_patterns")
+  @@id([postId, sentenceIndex])
+  @@map("sentence_features")
+}
+
+model NeuralModel {
+  id           String   @id
+  version      Int
+  exampleCount Int      @default(0) @map("example_count")
+  state        Json
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("neural_models")
 }
 
 model LearningBlacklist {

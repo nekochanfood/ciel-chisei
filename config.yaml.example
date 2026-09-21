@@ -33,15 +33,10 @@ bot:
   # 0..1。独り言タイマー tick ごとの投稿確率。1で毎回投稿。
   soloPostRate: 1
   # 返信の長さ = 相手の文のトークン数 × この係数。min/max で丸める。
-  # 上限は 500 まで (12超で長文扱い: 短縮装飾なし・切り上げ抑制・ban緩和)。
+  # 上限は 500 まで。長い目標では複数のテンプレート文を組み合わせる。
   replyLengthFactor: 1
   replyMinTokens: 2
   replyMaxTokens: 24
-  # 生成のランダム性。大きいほどレアな繋がりを拾う (1.0=素直、2.0以上はカオス)。
-  temperature: 1.8
-  # 0..1。大きいほど学習文の逐語再現を崩す (繋ぎ変え＋切り上げ＋verbatim拒否)。0=決定論的再現。
-  variety: 0.8
-
 server:
   # Docker では 8080 のままにすること (compose の ports と対応)。
   port: 8080

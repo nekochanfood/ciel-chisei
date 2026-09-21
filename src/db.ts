@@ -35,12 +35,9 @@ export async function isBlacklisted(db: Db, userId: string): Promise<boolean> {
 const REQUIRED_TABLES = [
 	"learned_posts",
 	"replied_posts",
-	"markov_edges",
-	"markov_token_labels",
-	"markov_sequences",
-	"markov_token_pos",
-	"markov_token_forms",
-	"markov_patterns",
+	"lexemes",
+	"sentence_features",
+	"neural_models",
 	"learning_blacklist",
 ];
 

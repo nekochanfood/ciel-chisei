@@ -1,5 +1,5 @@
 import { ChiseiBot } from "./bot/chisei.js";
-import { MarkovModel } from "./bot/markov.js";
+import { LanguageModel } from "./bot/language.js";
 import { getTokenizerKind, loadTokenizer } from "./bot/tokenizer.js";
 import { createCielClient } from "./ciel/client.js";
 import { connectRealtime } from "./ciel/websocket.js";
@@ -18,21 +18,16 @@ async function main(): Promise<void> {
 	await loadTokenizer();
 	console.info(`[tokenizer] kind=${getTokenizerKind()}`);
 
-	const markov = new MarkovModel({
-		temperature: config.temperature,
-		variety: config.variety,
-		// 通常長リトライの上限も返信長に追従させる (長文設定で短く切り詰めない)
-		maxTokens: config.replyMaxTokens,
-	});
-	await markov.load(db);
+	const language = new LanguageModel();
+	await language.load(db);
 
 	const client = createCielClient(config);
 	const me = await client.me();
 	console.info(
-		`[bot] logged in as @${me.username} (${me.id}), markov edges=${markov.edgeCount}`,
+		`[bot] logged in as @${me.username} (${me.id}), vocabulary=${language.vocabularySize} examples=${language.exampleCount}`,
 	);
 
-	const bot = new ChiseiBot(db, client, me, markov, config.wakeWords, {
+	const bot = new ChiseiBot(db, client, me, language, config.wakeWords, {
 		replyRate: config.replyRate,
 		soloPostRate: config.soloPostRate,
 		replyLengthFactor: config.replyLengthFactor,

@@ -269,6 +269,16 @@ export async function tokenizeDetailed(text: string): Promise<DetailedToken[]> {
 		}
 		allTokens.push(...segmentRegion(cleaned));
 	}
+	// `www` と文末の「草」は語彙ではなくネット上の装飾として別途学習する。
+	// 「草を刈る」のように後続語がある場合は通常の名詞として残す。
+	while (allTokens.length > 0) {
+		const last = allTokens.at(-1)?.text ?? "";
+		if (/^[wｗ]{2,}$/iu.test(last) || last === "草" || /^草{2,}$/u.test(last)) {
+			allTokens.pop();
+			continue;
+		}
+		break;
+	}
 	return allTokens;
 }
 

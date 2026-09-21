@@ -22,6 +22,7 @@
 		"db:migrate": "node scripts/prisma.mjs migrate dev",
 		"db:deploy": "node scripts/prisma.mjs migrate deploy",
 		"db:studio": "node scripts/prisma.mjs studio",
+		"db:reset-learning": "node scripts/reset-markov.mjs",
 		"db:reset-markov": "node scripts/reset-markov.mjs",
 		"db:validate": "prisma validate"
 	},

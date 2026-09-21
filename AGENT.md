@@ -28,8 +28,8 @@ ciel-chisei/
 │   ├── ciel/websocket.ts    # ws(s)://.../ws/events with Origin + ciel_auth cookie
 │   └── bot/
 │       ├── chisei.ts        # learn + opt-out/in + mention reply + solo post + bio sync
-│       ├── markov.ts        # order-2 Markov model (global + per-author edges)
-  │       ├── tokenizer.ts     # mfm-js parsing + kuromoji morphemes w/ POS (Intl.Segmenter fallback)
+│       ├── language.ts      # curated templates + vocabulary + neural candidate ranker
+│       ├── tokenizer.ts     # mfm-js parsing + kuromoji morphemes w/ POS (Intl.Segmenter fallback)
 │       └── text.ts          # mention detection, opt commands, reply formatting, formatBio
 ├── Dockerfile               # never COPY config.yaml; runtime reads the mounted file
 └── docker-compose.yml.example # copy to docker-compose.yml (gitignored); bot + PostgreSQL
@@ -73,29 +73,28 @@ PostgreSQL, managed by the committed Prisma migrations and applied before boot:
 
 - `learned_posts(post_id, author_id, learned_at)` — skip duplicate learning
 - `replied_posts(post_id, reply_id, replied_at)` — skip duplicate replies
-- `markov_edges(author_id, prefix, next, count)` — trigram transitions (`w1\tw2` → next token), global (`author_id=''`) plus per-author rows for personalization
-- `markov_token_labels(token, can_start, can_end)` — observed sentence-position labels
-- `markov_sequences(hash, text, count)` — learned-sentence hashes for verbatim rejection
-- `markov_token_pos(token, pos, detail, count)` — POS categories per token for start/end filtering
+- `lexemes(surface, pos, detail, basic_form, conjugation, count)` — vocabulary used to fill curated slots
+- `sentence_features(post_id, sentence_index, author_id, features)` — interpretable training features
+- `neural_models(id, version, example_count, state)` — persisted weights for the candidate ranker
 - `learning_blacklist(user_id, created_at)` — opt-out list (`学習禁止` / `学習許可`)
 
 Do not introduce a second data store. Change tables through `prisma/schema.prisma` and a committed Prisma migration.
 
 ## Changing speech behavior
 
-- Tokenization: `src/bot/tokenizer.ts` (mfm-js strips mentions/URLs/code/decorators; unicode emoji + `:custom_emoji:` are decoration and dropped before learning; kuromoji segments the rest into morphemes with POS tags, `Intl.Segmenter` fallback; punctuation is stripped at learn time and re-added as full-width decorations at speech time). `loadTokenizer()` loads the kuromoji dictionary at boot. Sanitization in `cleanPlainText`: markdown links keep text only; emails, `https?://` URLs, bare domains, IPv4/`localhost:port`, mentions, and emoji are dropped before learning.
-- Generation: `src/bot/markov.ts`. `ingest()` updates memory and `persist()` writes inside the learning transaction (edges + labels + learned-sentence hashes in `markov_sequences` + POS categories in `markov_token_pos`). Replies and solo posts call `generate(seed, me.id)`, so the bot's own transitions form its persona while seed tokens supply the topic. Thirty percent use the five full-width punctuation styles; generation only starts/ends on observed position labels refined by POS categories, and verbatim reproductions of learned sentences are rejected (unless `variety: 0`). Single-token outputs must be standalone-capable (`isStandaloneOk`: no bare auxiliaries/particles like 「ております」); every utterance must contain at least one content word (`CONTENT_POS`: 自立語), enforced in `ChiseiBot.isPostable`. Sentence patterns live in `src/bot/pattern.ts`: learned sentences are abstracted to skeletons (particles fixed by surface, verbs by conjugation type, nouns by POS) counted in `markov_patterns`, verb surfaces indexed by (pos, basic form, conjugation) in `markov_token_forms`; `tryGenerate` adds one pattern-filled candidate per round with a +0.5 score bonus. Chain-mechanics tests stub `generateFromPattern` to isolate chain behavior.
+- Tokenization: `src/bot/tokenizer.ts` (mfm-js strips mentions/URLs/code/decorators; unicode emoji + `:custom_emoji:` are dropped; terminal `www` / `草` are removed from lexical tokens and learned as style features). kuromoji supplies POS/basic forms, with `Intl.Segmenter` fallback.
+- Generation: `src/bot/language.ts`. More than 100 curated casual-Japanese templates own all grammar and particles. Learned nouns, base-form verbs/adjectives, and adverbs only fill declared slots. A dependency-free 54→16→1 ReLU network ranks 24 candidates from context, length, POS, seed overlap, family, and decoration. Before 20 examples it uses the deterministic heuristic portion. The source corpus never supplies templates.
 - Mention rules: `src/bot/text.ts` `isMentionForBot`. Default is mention-only. `bot.wakeWords` (YAML array) adds extra substrings.
 - Opt commands: `parseOptCommand` requires a mention of the bot plus exactly `学習禁止|学習拒否|オプトアウト` (opt-out) or `学習許可|学習再開|オプトイン` (opt-in). Handled in `ChiseiBot.handlePost` before learning, acknowledged with a 👍 reaction.
-- Bio: `formatBio(edgeCount, lastLearnedAt)` template in `src/bot/text.ts` (`覚えた言葉: N` + `(最終更新: YYYY/MM/DD HH:mm:ss JST)`); `ChiseiBot.syncBio()` reads `MAX(learned_at)` and PATCHes only when count or timestamp changed (5-min timer + 30-s debounce after learning).
-- Solo posts: `ChiseiBot.postSolo()` in `src/index.ts` on a `soloPostIntervalMinutes * 60_000` timer; `0` disables. Talk volume: `bot.replyRate` gates mention replies, `bot.soloPostRate` gates solo ticks (both 0..1, default 1; learning still happens on skips). Reply length adapts: `generate(seed, me.id, targetTokens)` with `target = clamp(round(seedTokens * replyLengthFactor), replyMinTokens, replyMaxTokens)` (max 500), retrying at full length when the targeted generation comes back empty (avoids fallback phrases on short mentions). Targets over 12 tokens count as long-form: playful shortening is skipped, early-stop probability scales as 24/limit, generation attempts double, the verbatim window scales with output length (4..12), and the reply clip budget widens (4 chars/token). `MarkovModel` also receives `maxTokens: replyMaxTokens` so the full-length round is not stuck at 24.
-- Fallback phrases when the model is empty live in `src/bot/text.ts`. `tryGenerate` collects up to 3 candidates per length round and posts the best `scoreCandidate` (content words + seed overlap + closeness to target length). Fallback posts are recorded in `learned_posts` but never ingested as edges, so fallback boilerplate never pollutes the vocabulary (not even via later timeline encounters).
+- Bio: `formatBio(vocabularySize, lastLearnedAt)` in `src/bot/text.ts`; `ChiseiBot.syncBio()` PATCHes only when the count or timestamp changes.
+- Solo posts and replies use the same template generator. Reply length follows `replyLengthFactor` / min / max; longer targets compose up to three template sentences. Every final reply, including its mention, is clipped to Ciel's 300-character limit.
+- Fallback phrases live in `src/bot/text.ts`. They are recorded in `learned_posts` but never added to vocabulary or training features.
 
-When you change mention/Markov/reply formatting, update `src/text.test.ts` / `src/bot.test.ts`. When you change config keys, update `src/config.test.ts`, `config.yaml.example`, and the README reference table.
+When you change templates/features/reply formatting, update `src/bot/language.test.ts` / `src/bot.test.ts`. When you change config keys, update `src/config.test.ts`, both example configs, and the README reference table.
 
 ## Docker / GitHub deploy notes
 
-- Compose `bot` runs `npm start -- --config /app/config.yaml`, applies Prisma migrations, and mounts `./config.docker.yaml:/app/config.yaml:ro`. The image never bundles any config (`.dockerignore` + no `COPY` in `Dockerfile`). Every boot runs `migrate deploy` via `scripts/start.mjs`, so the markov wipe migration also applies on Docker deploys (always `up --build`). Leftovers can be wiped manually with `npm run db:reset-markov` (local) or `docker compose exec bot npm run db:reset-markov -- --config /app/config.yaml`.
+- Compose `bot` runs `npm start -- --config /app/config.yaml`, applies Prisma migrations, and mounts `./config.docker.yaml:/app/config.yaml:ro`. Every boot runs `migrate deploy`; reset speech learning with `npm run db:reset-learning` (`db:reset-markov` remains an alias).
 - Local dev uses `config.yaml` (`localhost` URLs). Docker uses `config.docker.yaml`: Ciel at `host.docker.internal:6137`, DB at `postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei`. Never use `localhost` inside the container (it points at the container itself).
 - Keep `server.port` at `8080` under Docker (matches `ports: "8080:8080"`).
 - Image build runs `npm run gen:openapi` if the network can reach GitHub; otherwise committed `src/generated/api.d.ts` is used. After a Ciel API change, regenerate and commit the types.
@@ -104,7 +103,7 @@ When you change mention/Markov/reply formatting, update `src/text.test.ts` / `sr
 ## Typical follow-up tasks
 
 1. Ciel OpenAPI changed → `npm run gen:openapi`, fix `src/ciel/client.ts` compile errors, commit `src/generated/api.d.ts`.
-2. Bot loops or echoes itself → inspect the persisted `me.id` transitions and generation variety; own posts are deliberately learned once through `learned_posts`.
+2. Tone selection looks wrong → inspect `sentence_features` and the `neural_models.example_count`; the heuristic is intentionally used for the first 20 examples.
 3. P2021 table does not exist at boot → migrations never applied: check `migrate status`, redeploy (`up --build`), and make sure the compose `command` still goes through `npm start`. `assertSchemaReady()` in `src/db.ts` reports the missing tables explicitly.
 4. P3005 (database is not empty) on `migrate deploy` → pre-Prisma tables exist: baseline with `migrate resolve --applied "20260921120000_adopt_existing_schema"` (one-off `compose run --rm bot ...`), then redeploy. Never `down -v` (loses `replied_posts`/`learning_blacklist`). The markov_sequences migration is baseline-safe: it backfills missing tables/columns and guards its DELETEs.
 3. WS never connects → check Ciel `ALLOWED_ORIGINS` vs `ciel.wsOrigin`; polling should still learn/reply.
