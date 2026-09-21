@@ -6,6 +6,7 @@ config.docker.yaml
 docker-compose.yml
 docker-compose.override.yml
 vendor/
+src/generated/prisma/
 *.log
 .DS_Store
 coverage/

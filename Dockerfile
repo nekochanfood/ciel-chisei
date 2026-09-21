@@ -10,6 +10,8 @@ RUN apt-get update \
 # read-only マウントした実ファイルを読む。イメージに設定はバンドルしない。
 COPY package.json package-lock.json ./
 COPY scripts ./scripts
+COPY prisma ./prisma
+COPY prisma.config.ts ./
 COPY tsconfig.json vitest.config.ts ./
 COPY src ./src
 
@@ -27,8 +29,11 @@ ENV NODE_ENV=production
 COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/prisma ./prisma
+COPY --from=build /app/prisma.config.ts ./
+COPY --from=build /app/scripts ./scripts
 COPY --from=build /app/src/generated ./src/generated
 
 USER node
 EXPOSE 8080
-CMD ["node", "dist/index.js"]
+CMD ["npm", "start"]

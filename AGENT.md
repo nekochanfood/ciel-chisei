@@ -16,11 +16,12 @@ This repository is **ciel-chisei**, a TypeScript bot for [bettaworx/ciel](https:
 ciel-chisei/
 ├── config.yaml.example      # copy to config.yaml and edit; config.yaml is gitignored
 ├── scripts/sync-openapi.mjs # fetch packages/api from GitHub, run openapi-typescript
+├── prisma/                  # Prisma schema + committed migrations
 ├── src/
 │   ├── index.ts             # entry: db, backfill, bio sync, ws + poll + solo timers
 │   ├── config.ts            # YAML-only config (zod). --config flag > CONFIG_PATH > ./config.yaml
 │   ├── config.test.ts       # YAML loading, defaults, missing-file error, --config parsing
-│   ├── db.ts                # postgres.js + schema bootstrap (incl. blacklist)
+│   ├── db.ts                # Prisma Client + PostgreSQL adapter
 │   ├── health.ts            # GET /healthz
 │   ├── generated/api.d.ts   # generated; do not hand-edit
 │   ├── ciel/client.ts       # openapi-fetch wrapper (GET /me, /timeline, POST /posts, reactions, PATCH /me/profile)
@@ -55,6 +56,8 @@ cp config.yaml.example config.yaml             # then edit ciel.accessToken / da
 cp docker-compose.yml.example docker-compose.yml # real compose file is gitignored
 npm install
 npm run gen:openapi    # network: GitHub tarball + openapi-typescript
+npm run db:migrate     # create/apply a development migration
+npm run db:studio      # inspect the YAML-configured database
 npm test               # vitest
 npm run typecheck
 npm run lint
@@ -66,19 +69,20 @@ docker compose up --build
 
 ## Database
 
-PostgreSQL, auto-created on boot in `src/db.ts`:
+PostgreSQL, managed by the committed Prisma migrations and applied before boot:
 
 - `learned_posts(post_id, author_id, learned_at)` — skip duplicate learning
 - `replied_posts(post_id, reply_id, replied_at)` — skip duplicate replies
 - `markov_edges(author_id, prefix, next, count)` — trigram transitions (`w1\tw2` → next token), global (`author_id=''`) plus per-author rows for personalization
+- `markov_token_labels(token, can_start, can_end)` — observed sentence-position labels
 - `learning_blacklist(user_id, created_at)` — opt-out list (`学習禁止` / `学習許可`)
 
-Do not introduce a second data store. If you change tables, keep bootstrap idempotent (`CREATE TABLE IF NOT EXISTS`, plus the `author_id` migration guard in `migrate()`).
+Do not introduce a second data store. Change tables through `prisma/schema.prisma` and a committed Prisma migration.
 
 ## Changing speech behavior
 
 - Tokenization: `src/bot/tokenizer.ts` (mfm-js strips mentions/URLs/code/decorators, keeps unicode + `:custom_emoji:`; BudouX segments the rest). `loadTokenizer()` is a no-op kept for the boot sequence.
-- Generation: `src/bot/markov.ts`. `ingest()` is the in-memory path used by tests; `learn()` persists. Replies and solo posts call `generate(seed, me.id)`, so the bot's own transitions form its persona while seed tokens only supply the topic. Thirty percent of utterances stop at one BudouX token; the rest use normal generation.
+- Generation: `src/bot/markov.ts`. `ingest()` updates memory and `persist()` writes inside the learning transaction. Replies and solo posts call `generate(seed, me.id)`, so the bot's own transitions form its persona while seed tokens supply the topic. Thirty percent use the five punctuation styles; generation only starts/ends on observed position labels.
 - Mention rules: `src/bot/text.ts` `isMentionForBot`. Default is mention-only. `bot.wakeWords` (YAML array) adds extra substrings.
 - Opt commands: `parseOptCommand` requires a mention of the bot plus exactly `学習禁止|学習拒否|オプトアウト` (opt-out) or `学習許可|学習再開|オプトイン` (opt-in). Handled in `ChiseiBot.handlePost` before learning, acknowledged with a 👍 reaction.
 - Bio: `formatBio(edgeCount, lastLearnedAt)` template in `src/bot/text.ts` (`覚えた言葉: N` + `(最終更新: YYYY/MM/DD HH:mm:ss JST)`); `ChiseiBot.syncBio()` reads `MAX(learned_at)` and PATCHes only when count or timestamp changed (5-min timer + 30-s debounce after learning).
@@ -89,7 +93,7 @@ When you change mention/Markov/reply formatting, update `src/text.test.ts` / `sr
 
 ## Docker / GitHub deploy notes
 
-- Compose `bot` runs `node dist/index.js --config /app/config.yaml` and mounts `./config.docker.yaml:/app/config.yaml:ro`. The image never bundles any config (` .dockerignore` + no `COPY` in `Dockerfile`).
+- Compose `bot` runs `npm start -- --config /app/config.yaml`, applies Prisma migrations, and mounts `./config.docker.yaml:/app/config.yaml:ro`. The image never bundles any config (`.dockerignore` + no `COPY` in `Dockerfile`).
 - Local dev uses `config.yaml` (`localhost` URLs). Docker uses `config.docker.yaml`: Ciel at `host.docker.internal:6137`, DB at `postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei`. Never use `localhost` inside the container (it points at the container itself).
 - Keep `server.port` at `8080` under Docker (matches `ports: "8080:8080"`).
 - Image build runs `npm run gen:openapi` if the network can reach GitHub; otherwise committed `src/generated/api.d.ts` is used. After a Ciel API change, regenerate and commit the types.

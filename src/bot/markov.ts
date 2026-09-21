@@ -1,4 +1,4 @@
-import type { Sql } from "../db.js";
+import type { Db, DbTransaction } from "../db.js";
 import { BOS, EOS } from "./tokenizer.js";
 
 const DEFAULT_MAX_TOKENS = 24;
@@ -11,10 +11,6 @@ export type MarkovOptions = {
 	seedBoost: number;
 	/** Additive weight per count of the author's own transitions. */
 	userBoost: number;
-	/** Probability to start generation from the author's own prefixes. */
-	userStartBias: number;
-	/** Probability to prefer seed-matching start prefixes. */
-	seededStartBias: number;
 	/** 0..1 overall novelty: drives bigram backoff + early stopping. */
 	variety: number;
 };
@@ -23,8 +19,6 @@ const DEFAULT_OPTIONS: MarkovOptions = {
 	temperature: 1.4,
 	seedBoost: 2,
 	userBoost: 6,
-	userStartBias: 0.6,
-	seededStartBias: 0.7,
 	variety: 0.5,
 };
 
@@ -35,26 +29,28 @@ export class MarkovModel {
 		string,
 		Map<string, Map<string, number>>
 	>();
+	private readonly startTokens = new Set<string>();
+	private readonly endTokens = new Set<string>();
 
 	constructor(options: Partial<MarkovOptions> = {}) {
 		this.options = { ...DEFAULT_OPTIONS, ...options };
 	}
 
-	async load(sql: Sql): Promise<void> {
+	async load(db: Db): Promise<void> {
 		this.globalEdges.clear();
 		this.userEdges.clear();
-		const rows = await sql<
-			{
-				author_id: string;
-				prefix: string;
-				next: string;
-				count: number;
-			}[]
-		>`
-      SELECT author_id, prefix, next, count FROM markov_edges
-    `;
-		for (const row of rows) {
-			this.addEdge(row.prefix, row.next, row.author_id, row.count);
+		this.startTokens.clear();
+		this.endTokens.clear();
+		const [edges, labels] = await Promise.all([
+			db.markovEdge.findMany(),
+			db.markovTokenLabel.findMany(),
+		]);
+		for (const edge of edges) {
+			this.addEdge(edge.prefix, edge.nextToken, edge.authorId, edge.count);
+		}
+		for (const label of labels) {
+			if (label.canStart) this.startTokens.add(label.token);
+			if (label.canEnd) this.endTokens.add(label.token);
 		}
 	}
 
@@ -66,53 +62,72 @@ export class MarkovModel {
 		return total;
 	}
 
+	canStart(token: string): boolean {
+		return this.startTokens.has(token);
+	}
+
+	canEnd(token: string): boolean {
+		return this.endTokens.has(token);
+	}
+
 	ingest(
 		tokens: string[],
 		authorId = "",
 	): Array<{ prefix: string; next: string }> {
-		if (tokens.length === 0) {
-			return [];
-		}
-		const edges: Array<{ prefix: string; next: string }> = [];
-		const padded = [BOS, BOS, ...tokens, EOS];
-		for (let i = 0; i < padded.length - 2; i += 1) {
-			const prefix = `${padded[i]}\t${padded[i + 1]}`;
-			const next = padded[i + 2] ?? EOS;
+		const edges = this.buildEdges(tokens);
+		for (const { prefix, next } of edges) {
 			this.addEdge(prefix, next, authorId, 1);
-			edges.push({ prefix, next });
 		}
 		return edges;
 	}
 
-	async learn(sql: Sql, tokens: string[], authorId = ""): Promise<void> {
-		for (const edge of this.ingest(tokens, authorId)) {
-			await sql`
-        INSERT INTO markov_edges (author_id, prefix, next, count)
-        VALUES (${authorId}, ${edge.prefix}, ${edge.next}, 1)
-        ON CONFLICT (author_id, prefix, next)
-        DO UPDATE SET count = markov_edges.count + 1
-      `;
+	async persist(
+		db: DbTransaction,
+		tokens: string[],
+		authorId = "",
+	): Promise<void> {
+		if (tokens.length === 0) return;
+		const edges = this.buildEdges(tokens);
+		for (const edge of edges) {
+			await db.markovEdge.upsert({
+				where: {
+					authorId_prefix_nextToken: {
+						authorId,
+						prefix: edge.prefix,
+						nextToken: edge.next,
+					},
+				},
+				create: { authorId, prefix: edge.prefix, nextToken: edge.next },
+				update: { count: { increment: 1 } },
+			});
+		}
+		const first = tokens[0] as string;
+		const last = tokens.at(-1) as string;
+		await db.markovTokenLabel.upsert({
+			where: { token: first },
+			create: { token: first, canStart: true, canEnd: first === last },
+			update: { canStart: true, ...(first === last ? { canEnd: true } : {}) },
+		});
+		if (last !== first) {
+			await db.markovTokenLabel.upsert({
+				where: { token: last },
+				create: { token: last, canEnd: true },
+				update: { canEnd: true },
+			});
 		}
 	}
 
-	generate(
-		seedTokens: string[] = [],
-		authorId?: string,
-		maxTokens = DEFAULT_MAX_TOKENS,
-	): string[] {
+	generate(seedTokens: string[] = [], authorId?: string): string[] {
 		if (this.globalEdges.size === 0) {
 			return [];
 		}
 
 		// Try up to 3 times to generate a non-empty sequence
 		for (let attempt = 0; attempt < 3; attempt += 1) {
-			let prefix = this.pickStartPrefix(seedTokens, authorId, attempt > 0);
-			if (!prefix) {
-				prefix = `${BOS}\t${BOS}`;
-			}
+			let prefix = `${BOS}\t${BOS}`;
 			const stopProbability = 0.3 * this.options.variety;
 			const output: string[] = [];
-			for (let i = 0; i < maxTokens; i += 1) {
+			for (let i = 0; i < DEFAULT_MAX_TOKENS; i += 1) {
 				const next = this.pickNext(prefix, seedTokens, authorId);
 				if (!next || next === EOS) {
 					break;
@@ -122,6 +137,7 @@ export class MarkovModel {
 				// memorized passages while keeping short replies intact.
 				if (
 					output.length >= MIN_TOKENS_BEFORE_STOP &&
+					this.canEnd(next) &&
 					Math.random() < stopProbability
 				) {
 					break;
@@ -129,7 +145,7 @@ export class MarkovModel {
 				const parts: string[] = prefix.split("\t");
 				prefix = `${parts[1] ?? BOS}\t${next}`;
 			}
-			if (output.length > 0) {
+			if (output.length > 0 && this.canEnd(output.at(-1) as string)) {
 				return output;
 			}
 		}
@@ -142,6 +158,13 @@ export class MarkovModel {
 		authorId = "",
 		count = 1,
 	): void {
+		if (prefix === `${BOS}\t${BOS}` && next !== EOS) {
+			this.startTokens.add(next);
+		}
+		if (next === EOS) {
+			const last = prefix.split("\t")[1];
+			if (last && last !== BOS) this.endTokens.add(last);
+		}
 		// Global edges
 		const nexts = this.globalEdges.get(prefix) ?? new Map<string, number>();
 		nexts.set(next, (nexts.get(next) ?? 0) + count);
@@ -158,51 +181,20 @@ export class MarkovModel {
 		}
 	}
 
-	private pickStartPrefix(
-		seedTokens: string[],
-		authorId?: string,
-		fallbackToBos = false,
-	): string | undefined {
-		if (fallbackToBos && this.globalEdges.has(`${BOS}\t${BOS}`)) {
-			return `${BOS}\t${BOS}`;
-		}
-
-		// Check if target user has specific prefixes
-		const userPrefixes =
-			authorId && this.userEdges.has(authorId)
-				? [...(this.userEdges.get(authorId)?.keys() ?? [])]
-				: [];
-
-		const candidatePrefixes =
-			userPrefixes.length > 0 && Math.random() < this.options.userStartBias
-				? userPrefixes
-				: [...this.globalEdges.keys()];
-
-		if (candidatePrefixes.length === 0) {
-			return undefined;
-		}
-
-		const seedSet = new Set(seedTokens);
-		const seeded = candidatePrefixes.filter((prefix) => {
-			const [w1, w2] = prefix.split("\t");
-			if (w2 === EOS) {
-				return false;
-			}
-			return (
-				(w1 !== undefined && seedSet.has(w1)) ||
-				(w2 !== undefined && seedSet.has(w2))
-			);
-		});
-
-		if (seeded.length > 0 && Math.random() < this.options.seededStartBias) {
-			return seeded[Math.floor(Math.random() * seeded.length)];
-		}
-		if (this.globalEdges.has(`${BOS}\t${BOS}`) && Math.random() < 0.4) {
-			return `${BOS}\t${BOS}`;
-		}
-		return candidatePrefixes[
-			Math.floor(Math.random() * candidatePrefixes.length)
-		];
+	private buildEdges(
+		tokens: string[],
+	): Array<{ prefix: string; next: string }> {
+		if (tokens.length === 0) return [];
+		const padded = [BOS, BOS, ...tokens, EOS];
+		return tokens
+			.map((_, index) => ({
+				prefix: `${padded[index]}\t${padded[index + 1]}`,
+				next: padded[index + 2] ?? EOS,
+			}))
+			.concat({
+				prefix: `${padded[tokens.length]}\t${padded[tokens.length + 1]}`,
+				next: EOS,
+			});
 	}
 
 	private pickNext(

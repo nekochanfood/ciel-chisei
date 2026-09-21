@@ -1,0 +1,52 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model LearnedPost {
+  postId    String   @id @map("post_id")
+  authorId  String   @map("author_id")
+  learnedAt DateTime @default(now()) @map("learned_at") @db.Timestamptz
+
+  @@map("learned_posts")
+}
+
+model RepliedPost {
+  postId    String   @id @map("post_id")
+  replyId   String   @map("reply_id")
+  repliedAt DateTime @default(now()) @map("replied_at") @db.Timestamptz
+
+  @@map("replied_posts")
+}
+
+model MarkovEdge {
+  authorId  String @default("") @map("author_id")
+  prefix    String
+  nextToken String @map("next")
+  count     Int    @default(1)
+
+  @@id([authorId, prefix, nextToken])
+  @@index([authorId, prefix], map: "markov_edges_author_prefix_idx")
+  @@index([prefix], map: "markov_edges_prefix_idx")
+  @@map("markov_edges")
+}
+
+model MarkovTokenLabel {
+  token    String  @id
+  canStart Boolean @default(false) @map("can_start")
+  canEnd   Boolean @default(false) @map("can_end")
+
+  @@map("markov_token_labels")
+}
+
+model LearningBlacklist {
+  userId    String   @id @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("learning_blacklist")
+}
