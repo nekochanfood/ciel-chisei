@@ -28,7 +28,7 @@ services:
     # 専用 net 内では `db` はこの compose の postgres のみに解決される。
     command: ["node", "dist/index.js", "--config", "/app/config.yaml"]
     volumes:
-      - ./config.yaml:/app/config.yaml:ro
+      - ./config.docker.yaml:/app/config.yaml:ro
     networks:
       - chisei_net
     depends_on:

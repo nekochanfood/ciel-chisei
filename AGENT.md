@@ -88,8 +88,8 @@ When you change mention/Markov/reply formatting, update `src/text.test.ts` / `sr
 
 ## Docker / GitHub deploy notes
 
-- Compose `bot` runs `node dist/index.js --config /app/config.yaml` and mounts `./config.yaml:/app/config.yaml:ro`. The image never bundles `config.yaml` (`.dockerignore` + no `COPY` in `Dockerfile`).
-- For compose, set `database.url` to `postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei`. For local dev, use `...@localhost:5432/...`.
+- Compose `bot` runs `node dist/index.js --config /app/config.yaml` and mounts `./config.docker.yaml:/app/config.yaml:ro`. The image never bundles any config (` .dockerignore` + no `COPY` in `Dockerfile`).
+- Local dev uses `config.yaml` (`localhost` URLs). Docker uses `config.docker.yaml`: Ciel at `host.docker.internal:6137`, DB at `postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei`. Never use `localhost` inside the container (it points at the container itself).
 - Keep `server.port` at `8080` under Docker (matches `ports: "8080:8080"`).
 - Image build runs `npm run gen:openapi` if the network can reach GitHub; otherwise committed `src/generated/api.d.ts` is used. After a Ciel API change, regenerate and commit the types.
 - Health check path: `GET /healthz`.

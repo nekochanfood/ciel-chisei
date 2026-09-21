@@ -2,6 +2,7 @@ node_modules/
 dist/
 config.yaml
 config.yml
+config.docker.yaml
 docker-compose.yml
 docker-compose.override.yml
 vendor/

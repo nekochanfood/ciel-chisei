@@ -3,6 +3,7 @@ dist
 .git
 config.yaml
 config.yml
+config.docker.yaml
 coverage
 *.md
 !README.md

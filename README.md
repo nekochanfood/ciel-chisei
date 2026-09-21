@@ -66,13 +66,13 @@ npm run dev
 ## Docker
 
 ```bash
-cp config.yaml.example config.yaml
-cp docker-compose.yml.example docker-compose.yml
-# config.yaml の database.url を postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei にする
+cp config.yaml.example config.yaml                       # ローカル開発用
+cp docker-compose.yml.example docker-compose.yml         # Docker 用 compose 定義
+cp config.docker.yaml.example config.docker.yaml         # Docker 用設定 (トークン記入)
 docker compose up --build
 ```
 
-`docker-compose.yml` も `config.yaml` 同様、example をコピーして使う運用です（実ファイルは git 管理外）。
+`config.yaml` / `config.docker.yaml` / `docker-compose.yml` の実ファイルは git 管理外です（example をコピーして使う運用）。ローカル開発は `config.yaml`（`localhost` 参照）、Docker 内は `config.docker.yaml`（Ciel 本体=`host.docker.internal`、DB=`db` 参照）を使います。コンテナ内から `localhost` は自分自身を指すため、この使い分けが必要です。
 
 - ホストの `./config.yaml` をコンテナの `/app/config.yaml` に read-only マウントして読みます。
 - イメージに `config.yaml` は含めません（`.dockerignore` で除外、`Dockerfile` で `COPY` しない）。

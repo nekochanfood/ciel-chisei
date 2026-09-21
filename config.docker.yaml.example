@@ -1,0 +1,39 @@
+# Docker Compose 用の設定ファイルの見本です。
+# 使い方: cp config.docker.yaml.example config.docker.yaml して編集してください。
+# compose が ./config.docker.yaml をコンテナの /app/config.yaml に
+# read-only マウントします。イメージ自体に設定は含めません。
+# config.docker.yaml は git にコミットしないこと (アクセストークンを含むため)。
+#
+# 注意: コンテナ内からは localhost が自分自身を指すため、
+# Ciel 本体は host.docker.internal で、DB は compose の `db` で参照します。
+
+ciel:
+  # ホスト上で動く Ciel バックエンド (Docker Desktop のホスト到達名)。
+  apiBaseUrl: http://host.docker.internal:6137
+  # ボット用アカウントのアクセストークン。コミット厳禁。
+  accessToken: "CHANGE_ME"
+  # WebSocket ハンドシェイク用の Origin。Ciel 側 ALLOWED_ORIGINS に含めること。
+  wsOrigin: http://localhost:3000
+  # 任意。上書きしない場合は {origin}/ws/events が使われます。
+  # wsUrl: ws://host.docker.internal:6137/ws/events
+
+database:
+  # compose の db サービス (専用 net `chisei_net` 内で `db` に解決)。
+  url: postgres://ciel_chisei:ciel_chisei@db:5432/ciel_chisei
+
+bot:
+  # メンション以外でも反応させたい語。空ならメンションのみ。
+  wakeWords: []
+  # WebSocket が切れた時の /timeline ポーリング間隔(ms)。
+  pollIntervalMs: 15000
+  # 起動時に遡って学習するページ数(1ページ=30件)。
+  timelineBackfillPages: 5
+  # 独り言の間隔(分)。0 で無効化。
+  soloPostIntervalMinutes: 120
+
+server:
+  # 8080 のままにすること (compose の ports と対応)。
+  port: 8080
+
+# debug | info | warn | error
+logLevel: info
