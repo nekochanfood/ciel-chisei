@@ -53,6 +53,8 @@ describe("ChiseiBot", () => {
 			markovEdge: { upsert: vi.fn().mockResolvedValue({}) },
 			markovSequence: { upsert: vi.fn().mockResolvedValue({}) },
 			markovTokenPos: { upsert: vi.fn().mockResolvedValue({}) },
+			markovTokenForm: { upsert: vi.fn().mockResolvedValue({}) },
+			markovPattern: { upsert: vi.fn().mockResolvedValue({}) },
 			markovTokenLabel: {
 				upsert: vi.fn(async ({ where, create, update }) => {
 					const current = labels.get(where.token);
@@ -501,6 +503,8 @@ describe("ChiseiBot", () => {
 			.spyOn(markov, "generate")
 			.mockReturnValue(["今日", "は", "晴れ"]);
 		stubPostableOutput(markov);
+		// 連鎖の長さ配分を検証するため文型候補は外す
+		vi.spyOn(markov, "generateFromPattern").mockReturnValue([]);
 		// rate通過→playful→「、」選択 (idx 4)
 		const random = vi
 			.spyOn(Math, "random")
@@ -594,6 +598,8 @@ describe("ChiseiBot", () => {
 		const { db, client, markov } = createMockSetup();
 		const bot = new ChiseiBot(db, client, me, markov, []);
 		stubPostableOutput(markov);
+		// 連鎖候補の選択を検証するため文型候補は外す
+		vi.spyOn(markov, "generateFromPattern").mockReturnValue([]);
 		const generate = vi
 			.spyOn(markov, "generate")
 			.mockReturnValueOnce(["今日", "は", "晴れ"])
@@ -613,6 +619,47 @@ describe("ChiseiBot", () => {
 			expect(client.createPost.mock.calls[0]?.[0]?.content).toContain(
 				"猫は元気",
 			);
+		} finally {
+			random.mockRestore();
+		}
+	});
+
+	it("prefers a pattern-shaped candidate when patterns are learned", async () => {
+		const { db, client, markov } = createMockSetup();
+		const bot = new ChiseiBot(db, client, me, markov, []);
+		markov.ingest(["猫", "が", "走る"], "user_1", [
+			{ pos: "名詞", detail: "一般" },
+			{ pos: "助詞", detail: "格助詞" },
+			{
+				pos: "動詞",
+				detail: "自立",
+				basicForm: "走る",
+				conjugation: "五段・ラ行",
+			},
+		]);
+		markov.ingest(["犬", "は", "食べる"], "user_1", [
+			{ pos: "名詞", detail: "一般" },
+			{ pos: "助詞", detail: "係助詞" },
+			{
+				pos: "動詞",
+				detail: "自立",
+				basicForm: "食べる",
+				conjugation: "一段",
+			},
+		]);
+		// 文型「名詞 が 動詞:五段」を学習させる (五段スロットに一段は入らない)
+		markov.ingestPattern(["名詞", "=が", "動詞:五段・ラ行"]);
+		// 連鎖生成は文頭ゲートで落ちる候補だけ返す
+		const generate = vi
+			.spyOn(markov, "generate")
+			.mockReturnValue(["今日", "は", "晴れ"]);
+		const random = vi.spyOn(Math, "random").mockReturnValue(0.99);
+		try {
+			await bot.postSolo();
+			// 文型候補 [犬,が,走る] が採用される (連鎖3回はいずれも不採用)
+			expect(generate).toHaveBeenCalledTimes(3);
+			expect(client.createPost).toHaveBeenCalledTimes(1);
+			expect(client.createPost.mock.calls[0]?.[0]?.content).toBe("犬が走る");
 		} finally {
 			random.mockRestore();
 		}

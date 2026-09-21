@@ -8,6 +8,8 @@ const ALL_TABLES = [
 	"markov_token_labels",
 	"markov_sequences",
 	"markov_token_pos",
+	"markov_token_forms",
+	"markov_patterns",
 	"learning_blacklist",
 ];
 

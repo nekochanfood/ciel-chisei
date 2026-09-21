@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
 import type { Db, DbTransaction } from "../db.js";
+import {
+	fillSlots,
+	PatternModel,
+	type SkeletonCode,
+	skeletonKey,
+} from "./pattern.js";
 import { BOS, EOS } from "./tokenizer.js";
 
 export type PosTag = {
 	pos: string;
 	detail: string;
+	basicForm?: string;
+	conjugation?: string;
 };
 
 export type MarkovOptions = {
@@ -128,6 +136,15 @@ export class MarkovModel {
 	private readonly bannedNgrams = new Set<string>();
 	/** トークンごとの品詞観測数: token -> "pos\t detail" -> count */
 	private readonly tokenPos = new Map<string, Map<string, number>>();
+	/** POS 逆引き索引: pos -> token -> count (文型スロット充足用) */
+	private readonly posIndex = new Map<string, Map<string, number>>();
+	/**
+	 * 活用形索引: "pos\tbasic\tconjugation" -> 表層 -> count。
+	 * 動詞スロットに活用型の合う語彙をはめるために使う。
+	 */
+	private readonly verbForms = new Map<string, Map<string, number>>();
+	/** 文型スケルトンの頻度表 (文の「形」の記憶)。 */
+	private readonly patterns = new PatternModel();
 
 	constructor(options: Partial<MarkovOptions> = {}) {
 		this.options = { ...DEFAULT_OPTIONS, ...options };
@@ -141,12 +158,18 @@ export class MarkovModel {
 		this.sequences.clear();
 		this.bannedNgrams.clear();
 		this.tokenPos.clear();
-		const [edges, labels, sequences, posRows] = await Promise.all([
-			db.markovEdge.findMany(),
-			db.markovTokenLabel.findMany(),
-			db.markovSequence.findMany(),
-			db.markovTokenPos.findMany(),
-		]);
+		this.posIndex.clear();
+		this.verbForms.clear();
+		this.patterns.clear();
+		const [edges, labels, sequences, posRows, formRows, patternRows] =
+			await Promise.all([
+				db.markovEdge.findMany(),
+				db.markovTokenLabel.findMany(),
+				db.markovSequence.findMany(),
+				db.markovTokenPos.findMany(),
+				db.markovTokenForm.findMany(),
+				db.markovPattern.findMany(),
+			]);
 		for (const edge of edges) {
 			this.addEdge(edge.prefix, edge.nextToken, edge.authorId, edge.count);
 		}
@@ -160,6 +183,16 @@ export class MarkovModel {
 		for (const row of posRows) {
 			this.addPos(row.token, row.pos, row.detail, row.count);
 		}
+		for (const row of formRows) {
+			this.addForm(
+				row.token,
+				row.pos,
+				row.basicForm,
+				row.conjugation,
+				row.count,
+			);
+		}
+		this.patterns.load(patternRows);
 	}
 
 	get edgeCount(): number {
@@ -265,7 +298,17 @@ export class MarkovModel {
 		for (let i = 0; i < tokens.length; i += 1) {
 			const tag = tags[i];
 			if (tag) {
-				this.addPos(tokens[i] as string, tag.pos, tag.detail, 1);
+				const token = tokens[i] as string;
+				this.addPos(token, tag.pos, tag.detail, 1);
+				if (tag.basicForm || tag.conjugation) {
+					this.addForm(
+						token,
+						tag.pos,
+						tag.basicForm ?? "",
+						tag.conjugation ?? "",
+						1,
+					);
+				}
 			}
 		}
 		return edges;
@@ -325,7 +368,120 @@ export class MarkovModel {
 				create: { token, pos: tag.pos, detail: tag.detail },
 				update: { count: { increment: 1 } },
 			});
+			const basicForm = tag.basicForm ?? "";
+			const conjugation = tag.conjugation ?? "";
+			if (
+				(tag.pos === "動詞" || tag.pos === "形容詞") &&
+				(basicForm || conjugation)
+			) {
+				await db.markovTokenForm.upsert({
+					where: {
+						token_pos_basicForm_conjugation: {
+							token,
+							pos: tag.pos,
+							basicForm,
+							conjugation,
+						},
+					},
+					create: { token, pos: tag.pos, basicForm, conjugation },
+					update: { count: { increment: 1 } },
+				});
+			}
 		}
+	}
+
+	/** 文型スケルトンを記憶する (インメモリ)。 */
+	ingestPattern(codes: SkeletonCode[]): void {
+		this.patterns.addPattern(codes);
+	}
+
+	/** 文型スケルトンを DB に保存する。 */
+	async persistPattern(
+		tx: DbTransaction,
+		codes: SkeletonCode[],
+	): Promise<void> {
+		const pattern = skeletonKey(codes);
+		await tx.markovPattern.upsert({
+			where: { pattern },
+			create: { pattern },
+			update: { count: { increment: 1 } },
+		});
+	}
+
+	get patternCount(): number {
+		return this.patterns.patternCount;
+	}
+
+	/**
+	 * 文型を1つ選んでスロット充足する。文型未学習・充足不可なら []。
+	 * tryGenerate の候補源の1系統として使う。
+	 */
+	generateFromPattern(seedTokens: string[] = [], maxTokens?: number): string[] {
+		const codes = this.patterns.pickPattern(maxTokens);
+		if (!codes) {
+			return [];
+		}
+		return fillSlots(codes, seedTokens, this) ?? [];
+	}
+
+	/** PatternVocab: 指定 POS の表層トークンと観測数。 */
+	tokensForPos(pos: string): Array<{ text: string; count: number }> {
+		const bucket = this.posIndex.get(pos);
+		if (!bucket) {
+			return [];
+		}
+		return [...bucket].map(([text, count]) => ({ text, count }));
+	}
+
+	/** PatternVocab: 指定 POS・活用型の基本形と観測数。 */
+	lemmasFor(
+		pos: string,
+		conjugation: string,
+	): Array<{ basic: string; count: number }> {
+		const byBasic = new Map<string, number>();
+		for (const [key, surfaces] of this.verbForms) {
+			const tab = key.indexOf("\t");
+			const entryPos = key.slice(0, tab);
+			const rest = key.slice(tab + 1);
+			const tab2 = rest.indexOf("\t");
+			const basic = rest.slice(0, tab2);
+			const entryConj = rest.slice(tab2 + 1);
+			if (entryPos !== pos) {
+				continue;
+			}
+			if (conjugation !== "*" && entryConj !== conjugation) {
+				continue;
+			}
+			let total = 0;
+			for (const count of surfaces.values()) {
+				total += count;
+			}
+			byBasic.set(basic, (byBasic.get(basic) ?? 0) + total);
+		}
+		return [...byBasic].map(([basic, count]) => ({ basic, count }));
+	}
+
+	/** PatternVocab: 基本形＋活用型の観測表層形と観測数。 */
+	surfacesFor(
+		basic: string,
+		conjugation: string,
+	): Array<{ text: string; count: number }> {
+		const out: Array<{ text: string; count: number }> = [];
+		for (const [key, surfaces] of this.verbForms) {
+			const tab = key.indexOf("\t");
+			const rest = key.slice(tab + 1);
+			const tab2 = rest.indexOf("\t");
+			if (rest.slice(0, tab2) !== basic) {
+				continue;
+			}
+			if (conjugation !== "*" && rest.slice(tab2 + 1) !== conjugation) {
+				continue;
+			}
+			for (const [text, count] of surfaces) {
+				out.push({ text, count });
+			}
+		}
+		return out;
 	}
 
 	generate(
@@ -477,6 +633,30 @@ export class MarkovModel {
 		const key = `${pos}\t${detail}`;
 		counts.set(key, (counts.get(key) ?? 0) + count);
 		this.tokenPos.set(token, counts);
+		const bucket = this.posIndex.get(pos) ?? new Map<string, number>();
+		bucket.set(token, (bucket.get(token) ?? 0) + count);
+		this.posIndex.set(pos, bucket);
+	}
+
+	/**
+	 * 活用形の観測を記録する。動詞・形容詞のみ対象
+	 * (助動詞「です」「ます」等を動詞スロットに混ぜない)。
+	 * verbForms のキーは "pos\tbasic\tconjugation"。
+	 */
+	private addForm(
+		token: string,
+		pos: string,
+		basicForm: string,
+		conjugation: string,
+		count: number,
+	): void {
+		if (pos !== "動詞" && pos !== "形容詞") {
+			return;
+		}
+		const key = `${pos}\t${basicForm || token}\t${conjugation}`;
+		const surfaces = this.verbForms.get(key) ?? new Map<string, number>();
+		surfaces.set(token, (surfaces.get(token) ?? 0) + count);
+		this.verbForms.set(key, surfaces);
 	}
 
 	private buildEdges(

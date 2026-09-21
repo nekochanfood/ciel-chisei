@@ -63,6 +63,26 @@ model MarkovTokenPos {
   @@map("markov_token_pos")
 }
 
+model MarkovTokenForm {
+  token       String
+  pos         String @default("")
+  basicForm   String @default("") @map("basic_form")
+  conjugation String @default("")
+  count       Int    @default(1)
+
+  @@id([token, pos, basicForm, conjugation])
+  @@map("markov_token_forms")
+}
+
+model MarkovPattern {
+  pattern   String
+  count     Int      @default(1)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@id([pattern])
+  @@map("markov_patterns")
+}
+
 model LearningBlacklist {
   userId    String   @id @map("user_id")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz

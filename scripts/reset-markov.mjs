@@ -18,6 +18,8 @@ const TABLES = [
 	"markov_token_labels",
 	"markov_sequences",
 	"markov_token_pos",
+	"markov_token_forms",
+	"markov_patterns",
 	"learned_posts",
 ];
 

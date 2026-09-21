@@ -14,6 +14,10 @@ export type DetailedToken = {
 	text: string;
 	pos: string;
 	detail: string;
+	/** 動詞・形容詞の基本形 (文型スロット充足で活用型の整合に使う)。 */
+	basicForm: string;
+	/** 活用型 (五段・一段・カ変・サ変など。非活用語は空文字)。 */
+	conjugation: string;
 };
 
 let kuromojiTokenizer: KuromojiTokenizer | null = null;
@@ -97,6 +101,8 @@ function toDetailed(
 	text: string,
 	pos: string,
 	detail: string,
+	basicForm = "",
+	conjugation = "",
 ): DetailedToken | null {
 	const trimmed = text.trim();
 	if (trimmed.length === 0 || trimmed === BOS || trimmed === EOS) {
@@ -105,7 +111,7 @@ function toDetailed(
 	if (PUNCT_ONLY_REGEX.test(trimmed)) {
 		return null;
 	}
-	return { text: trimmed, pos, detail };
+	return { text: trimmed, pos, detail, basicForm, conjugation };
 }
 
 const wordSegmenter = new Intl.Segmenter("ja", { granularity: "word" });
@@ -128,7 +134,15 @@ function segmentWithKuromoji(text: string): DetailedToken[] {
 	try {
 		const out: DetailedToken[] = [];
 		for (const node of kuromojiTokenizer.tokenize(text)) {
-			const token = toDetailed(node.surface_form, node.pos, node.pos_detail_1);
+			const token = toDetailed(
+				node.surface_form,
+				node.pos,
+				node.pos_detail_1,
+				node.basic_form && node.basic_form !== "*" ? node.basic_form : "",
+				node.conjugated_type && node.conjugated_type !== "*"
+					? node.conjugated_type
+					: "",
+			);
 			if (token) {
 				out.push(token);
 			}

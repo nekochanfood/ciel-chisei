@@ -6,6 +6,7 @@ import {
 	removeBlacklist,
 } from "../db.js";
 import { CONTENT_POS, type MarkovModel, type PosTag } from "./markov.js";
+import { buildSkeleton, type SkeletonCode } from "./pattern.js";
 import {
 	buildReply,
 	clipContent,
@@ -175,7 +176,11 @@ export class ChiseiBot {
 	private async learn(post: Post, ingestEdges = true): Promise<void> {
 		// 文単位で形態素＋品詞に切り分けて学習する。文をまたぐエッジを作らないことで
 		// 投稿の丸暗記を防ぎ、文節の繋ぎ変え (ランダマイズ) の材料を増やす。
-		const sentences: Array<{ tokens: string[]; tags: PosTag[] }> = [];
+		const sentences: Array<{
+			tokens: string[];
+			tags: PosTag[];
+			skeleton: SkeletonCode[] | null;
+		}> = [];
 		if (ingestEdges) {
 			for (const sentence of splitSentences(post.content)) {
 				const detailed = (await tokenizeDetailed(sentence)).slice(
@@ -190,7 +195,11 @@ export class ChiseiBot {
 					tags: detailed.map((token) => ({
 						pos: token.pos,
 						detail: token.detail,
+						basicForm: token.basicForm,
+						conjugation: token.conjugation,
 					})),
+					// 文の「形」も覚える (文型スロット充足生成の材料)
+					skeleton: buildSkeleton(detailed),
 				});
 			}
 		}
@@ -200,14 +209,20 @@ export class ChiseiBot {
 				skipDuplicates: true,
 			});
 			if (inserted.count === 0) return false;
-			for (const { tokens, tags } of sentences) {
+			for (const { tokens, tags, skeleton } of sentences) {
 				await this.markov.persist(tx, tokens, post.author.id, tags);
+				if (skeleton) {
+					await this.markov.persistPattern(tx, skeleton);
+				}
 			}
 			return true;
 		});
 		if (!learned) return;
-		for (const { tokens, tags } of sentences) {
+		for (const { tokens, tags, skeleton } of sentences) {
 			this.markov.ingest(tokens, post.author.id, tags);
+			if (skeleton) {
+				this.markov.ingestPattern(skeleton);
+			}
 		}
 		this.requestBioSync();
 	}
@@ -313,6 +328,7 @@ export class ChiseiBot {
 		tokens: string[],
 		seed: string[],
 		maxTokens?: number,
+		fromPattern = false,
 	): number {
 		const seedSet = new Set(seed);
 		let content = 0;
@@ -330,7 +346,9 @@ export class ChiseiBot {
 		}
 		const lengthScore =
 			maxTokens === undefined ? 0 : -(maxTokens - tokens.length) * 0.3;
-		return content + seedHits * 1.5 + lengthScore;
+		// 文型生成は文章の形が整っている分だけ優遇する
+		const patternBonus = fromPattern ? 0.5 : 0;
+		return content + seedHits * 1.5 + lengthScore + patternBonus;
 	}
 
 	private callGenerate(seed: string[], maxTokens?: number): string[] {
@@ -350,19 +368,26 @@ export class ChiseiBot {
 					`[bot] targeted speech (${maxTokens} tokens) failed, retrying full length`,
 				);
 			}
-			// 同じ長さ制限で複数候補を作り、評価値の最良を採用する
+			// 同じ長さ制限で複数候補を作り、評価値の最良を採用する。
+			// 文型を学習済みなら文型スロット充足も1候補として加える
+			// (連鎖3回の呼び出し回数は変えない)。
 			let best: string[] = [];
 			let bestScore = Number.NEGATIVE_INFINITY;
-			for (let i = 0; i < 3; i += 1) {
-				const out = this.callGenerate(seed, limit);
+			const consider = (out: string[], fromPattern: boolean): void => {
 				if (!this.isPostable(out)) {
-					continue;
+					return;
 				}
-				const score = this.scoreCandidate(out, seed, maxTokens);
+				const score = this.scoreCandidate(out, seed, maxTokens, fromPattern);
 				if (score > bestScore) {
 					best = out;
 					bestScore = score;
 				}
+			};
+			if (this.markov.patternCount > 0) {
+				consider(this.markov.generateFromPattern(seed, limit), true);
+			}
+			for (let i = 0; i < 3; i += 1) {
+				consider(this.callGenerate(seed, limit), false);
 			}
 			if (best.length > 0) {
 				return best;

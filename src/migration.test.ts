@@ -62,11 +62,29 @@ describe("markov wipe on deploy", () => {
 			"markov_token_labels",
 			"markov_sequences",
 			"markov_token_pos",
+			"markov_token_forms",
+			"markov_patterns",
 			"learned_posts",
 		]) {
 			expect(script).toContain(table);
 		}
 		expect(script).not.toContain('DELETE FROM "replied_posts"');
 		expect(script).not.toContain('DELETE FROM "learning_blacklist"');
+	});
+
+	it("ships a migration that adds sentence-pattern tables", () => {
+		const dir = join(
+			root,
+			"prisma",
+			"migrations",
+			"20260921140000_sentence_patterns",
+			"migration.sql",
+		);
+		expect(existsSync(dir)).toBe(true);
+		const sql = readFileSync(dir, "utf8");
+		expect(sql).toContain('CREATE TABLE IF NOT EXISTS "markov_token_forms"');
+		expect(sql).toContain('CREATE TABLE IF NOT EXISTS "markov_patterns"');
+		// 追加のみ: 既存の学習データは消さない
+		expect(sql).not.toContain("DELETE FROM");
 	});
 });
